@@ -6,18 +6,7 @@
 [![release](https://img.shields.io/github/v/release/saborrie/grove?display_name=tag&sort=semver)](https://github.com/saborrie/grove/releases/latest)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-```
-┌─ grove ───────┬─ gradient.png   640 × 400   image · 3.9 KB ─┐
-│  ▸ clips      │                                             │
-│  ▾ pictures   │                                             │
-│      badge.png│              [ the picture ]                │
-│      gradient…│                                             │
-│  ▸ src        │                                             │
-│    notes.pdf  │                                             │
-│    README.md  │                                             │
-└───────────────┴─────────────────────────────────────────────┘
-   ↑ ↓ ← → Enter                    click · wheel
-```
+<img src="assets/demo.png" alt="grove: a file tree on the left, an image preview on the right, in one herdr pane" width="900">
 
 Yazi's previews and a VS Code tree, and nothing else at all.
 
@@ -56,6 +45,9 @@ grove is the small intersection: the tree shape, one fixed root, and real pictur
 - **Previews that earn the pane** — syntax-highlighted text with line numbers,
   images, video, the first page of a PDF, and a listing for directories. The
   preview follows the cursor, so walking the tree *is* browsing.
+
+<img src="assets/demo-code.png" alt="grove previewing a Rust file with syntax highlighting and line numbers" width="900">
+
 - **Arrows and Enter.** That is the entire keyboard surface, on purpose.
 
 ## Keys and mouse
@@ -166,6 +158,26 @@ There is none worth the name, deliberately:
 | --- | --- |
 | `GROVE_THEME=light` | Light palette and a light syntax theme |
 | `GROVE_ICONS=emoji` / `material` | Force an icon set instead of probing for a Nerd Font |
+
+## Regenerating the screenshots
+
+The images in this README are generated, not taken:
+
+```sh
+./scripts/record-demo.sh          # image scenario, the default
+./scripts/record-demo.sh code     # or: video, pdf
+```
+
+Docker is the only requirement. The script builds a container holding kitty,
+herdr, a Nerd Font and grove, brings up a virtual X display, runs herdr inside a
+real kitty on it, runs grove inside that, walks the tree with arrow keys and
+photographs the X root window.
+
+It has to work that way. The usual approach — asciinema plus a renderer like agg —
+records the escape-sequence stream, and grove's previews are not in it: herdr
+composites them as kitty graphics outside the text grid. A recording would show
+a perfect tree beside an empty rectangle. The only way to photograph a picture is
+to render one.
 
 ## Releasing
 
