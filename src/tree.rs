@@ -1,3 +1,6 @@
+//! Taken from herdr-sidebar and kept whole — expansion persistence and Collapse All came with it and
+//! is unused here, but keeping the file intact makes upstream fixes easy to merge.
+#![allow(dead_code)]
 //! Filesystem tree model: which directories are expanded, and the flat list of
 //! visible rows the UI renders. Directory listings are cached and re-read only on
 //! explicit refresh, so redraws never touch the disk.
@@ -71,7 +74,10 @@ impl Tree {
     /// Restore a persisted expanded set. Paths outside this tree's root are
     /// dropped: one state file is shared by every workspace's sidebars.
     pub fn set_expanded(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
-        self.expanded = paths.into_iter().filter(|p| p.starts_with(&self.root)).collect();
+        self.expanded = paths
+            .into_iter()
+            .filter(|p| p.starts_with(&self.root))
+            .collect();
         self.cache.clear();
     }
 
@@ -166,7 +172,8 @@ mod tests {
 
     impl TempDir {
         fn new(tag: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("aa-filetree-{}-{tag}", std::process::id()));
+            let path =
+                std::env::temp_dir().join(format!("aa-filetree-{}-{tag}", std::process::id()));
             let _ = fs::remove_dir_all(&path);
             fs::create_dir_all(&path).unwrap();
             Self(path)
@@ -198,7 +205,10 @@ mod tests {
 
         // One state file serves every workspace's sidebars, so a foreign
         // root must be dropped instead of resurrecting as a phantom row.
-        tree.set_expanded(vec![tmp.0.join("src"), PathBuf::from("/somewhere/else/src")]);
+        tree.set_expanded(vec![
+            tmp.0.join("src"),
+            PathBuf::from("/somewhere/else/src"),
+        ]);
         assert_eq!(tree.expanded_paths(), vec![tmp.0.join("src")]);
         assert!(tree.rows().iter().any(|r| r.name == "src" && r.expanded));
     }

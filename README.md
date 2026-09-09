@@ -97,8 +97,38 @@ Each is optional. Without one, that file type shows the reason instead of a pict
 
 ## Install
 
-Requires [herdr](https://herdr.dev) (0.8 or newer, with pane graphics left on —
-they are on by default) and a Rust toolchain to build.
+Requires [herdr](https://herdr.dev) 0.8 or newer, with pane graphics left on
+(they are on by default).
+
+### Linux — x86_64 or arm64
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saborrie/grove/main/scripts/install.sh | sh
+```
+
+That fetches the latest release into `~/.local/bin`, checking its SHA-256 first.
+The binaries are statically linked against musl, so they run on any Linux without
+matching a glibc version or installing a toolchain.
+
+```sh
+GROVE_VERSION=0.1.0 GROVE_INSTALL_DIR=/usr/local/bin \
+    curl -fsSL https://raw.githubusercontent.com/saborrie/grove/main/scripts/install.sh | sh
+```
+
+Prefer to look before you pipe? The script is
+[`scripts/install.sh`](scripts/install.sh), and every release carries the same
+tarballs and `.sha256` files on its
+[releases page](https://github.com/saborrie/grove/releases).
+
+### From source
+
+Needs a [Rust toolchain](https://rustup.rs). Any platform herdr runs on:
+
+```sh
+cargo install --git https://github.com/saborrie/grove
+```
+
+or from a checkout:
 
 ```sh
 git clone https://github.com/saborrie/grove
@@ -107,7 +137,11 @@ cargo build --release
 install -m755 target/release/grove ~/.local/bin/
 ```
 
-Then run it in any herdr pane:
+grove is not on crates.io — the name is held by an unrelated, long-abandoned
+crate, and `cargo install` needs a toolchain anyway, which is what the install
+script exists to avoid.
+
+### Running it
 
 ```sh
 grove            # rooted here
@@ -128,6 +162,22 @@ There is none worth the name, deliberately:
 | --- | --- |
 | `GROVE_THEME=light` | Light palette and a light syntax theme |
 | `GROVE_ICONS=emoji` / `material` | Force an icon set instead of probing for a Nerd Font |
+
+## Releasing
+
+Cargo.toml holds the version; a tag says which commit is that version. Pushing a
+tag that matches is the whole release process — CI checks the two agree, builds
+both Linux targets, and publishes the release only if every binary built.
+
+```sh
+# 1. bump `version` in Cargo.toml, commit it
+# 2. tag that commit with the same number, no `v` prefix
+git tag 0.2.0
+git push origin 0.2.0
+```
+
+`ci.yml` runs `cargo fmt --check`, `cargo clippy -D warnings` and the tests on
+every push to main and every pull request.
 
 ## Where the code came from
 

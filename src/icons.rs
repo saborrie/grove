@@ -1,3 +1,6 @@
+//! Taken from herdr-sidebar and kept whole — the persisted-theme helpers came with it and
+//! is unused here, but keeping the file intact makes upstream fixes easy to merge.
+#![allow(dead_code)]
 //! File-type icons, VS Code Explorer style, in two selectable themes:
 //!
 //! - `Emoji` (default): colored emoji, renders in any terminal font. Avoids
@@ -36,11 +39,13 @@ impl IconTheme {
     /// installed" is the best signal available — and a wrong guess is one
     /// persisted `i` keypress away from correct.
     pub fn resolve(env: Option<&str>, persisted: Option<Self>) -> Self {
-        Self::from_env(env)
-            .or(persisted)
-            .unwrap_or_else(|| {
-                if nerd_font_installed() { Self::Material } else { Self::Emoji }
-            })
+        Self::from_env(env).or(persisted).unwrap_or_else(|| {
+            if nerd_font_installed() {
+                Self::Material
+            } else {
+                Self::Emoji
+            }
+        })
     }
 
     pub fn from_state_name(name: &str) -> Option<Self> {
@@ -155,10 +160,16 @@ pub struct Icon {
 pub fn icon(theme: IconTheme, name: &str, is_dir: bool, expanded: bool) -> Icon {
     let kind = kind_of(name, is_dir, expanded);
     match theme {
-        IconTheme::Emoji => Icon { glyph: emoji(kind), rgb: None },
+        IconTheme::Emoji => Icon {
+            glyph: emoji(kind),
+            rgb: None,
+        },
         IconTheme::Material => {
             let (glyph, rgb) = material(kind);
-            Icon { glyph, rgb: Some(rgb) }
+            Icon {
+                glyph,
+                rgb: Some(rgb),
+            }
         }
     }
 }
@@ -337,51 +348,51 @@ fn emoji(kind: Kind) -> &'static str {
 /// Fonts v3 (devicons/codicons/Font Awesome/Material Design ranges).
 fn material(kind: Kind) -> (&'static str, (u8, u8, u8)) {
     match kind {
-        Kind::Dir => ("\u{f07b}", (0x90, 0xa4, 0xae)),      //  blue-grey folder
-        Kind::DirOpen => ("\u{f07c}", (0x90, 0xa4, 0xae)),  //  open folder
-        Kind::Rust => ("\u{e7a8}", (0xde, 0xa5, 0x84)),     //  rust orange
-        Kind::Python => ("\u{e73c}", (0x35, 0x72, 0xa5)),   //  python blue
-        Kind::Js => ("\u{e74e}", (0xf1, 0xe0, 0x5a)),       //  js yellow
-        Kind::Ts => ("\u{e628}", (0x31, 0x78, 0xc6)),       //  ts blue
-        Kind::React => ("\u{e7ba}", (0x61, 0xda, 0xfb)),    //  react cyan
-        Kind::Json => ("\u{e60b}", (0xcb, 0xcb, 0x41)),     //  json yellow
+        Kind::Dir => ("\u{f07b}", (0x90, 0xa4, 0xae)), //  blue-grey folder
+        Kind::DirOpen => ("\u{f07c}", (0x90, 0xa4, 0xae)), //  open folder
+        Kind::Rust => ("\u{e7a8}", (0xde, 0xa5, 0x84)), //  rust orange
+        Kind::Python => ("\u{e73c}", (0x35, 0x72, 0xa5)), //  python blue
+        Kind::Js => ("\u{e74e}", (0xf1, 0xe0, 0x5a)),  //  js yellow
+        Kind::Ts => ("\u{e628}", (0x31, 0x78, 0xc6)),  //  ts blue
+        Kind::React => ("\u{e7ba}", (0x61, 0xda, 0xfb)), //  react cyan
+        Kind::Json => ("\u{e60b}", (0xcb, 0xcb, 0x41)), //  json yellow
         Kind::Markdown => ("\u{f48a}", (0x51, 0x9a, 0xba)), //  markdown blue
-        Kind::Html => ("\u{e736}", (0xe3, 0x4c, 0x26)),     //  html orange
-        Kind::Css => ("\u{e749}", (0x42, 0xa5, 0xf5)),      //  css blue
-        Kind::Config => ("\u{e615}", (0x6d, 0x80, 0x86)),   //  gear grey
-        Kind::Xml => ("\u{f121}", (0xe3, 0x79, 0x33)),      //  code orange
-        Kind::Shell => ("\u{f489}", (0x4e, 0xaa, 0x25)),    //  shell green
+        Kind::Html => ("\u{e736}", (0xe3, 0x4c, 0x26)), //  html orange
+        Kind::Css => ("\u{e749}", (0x42, 0xa5, 0xf5)), //  css blue
+        Kind::Config => ("\u{e615}", (0x6d, 0x80, 0x86)), //  gear grey
+        Kind::Xml => ("\u{f121}", (0xe3, 0x79, 0x33)), //  code orange
+        Kind::Shell => ("\u{f489}", (0x4e, 0xaa, 0x25)), //  shell green
         Kind::PowerShell => ("\u{f0a0a}", (0x53, 0x91, 0xfe)), // 󰨊 powershell blue
-        Kind::CFamily => ("\u{e61d}", (0xf3, 0x4b, 0x7d)),  //  c/cpp pink
-        Kind::CSharp => ("\u{f031b}", (0x17, 0x86, 0x00)),  // 󰌛 c# green
-        Kind::Go => ("\u{e627}", (0x00, 0xad, 0xd8)),       //  go cyan
-        Kind::Ruby => ("\u{e791}", (0x70, 0x15, 0x16)),     //  ruby red
-        Kind::Php => ("\u{e73d}", (0x4f, 0x5d, 0x95)),      //  php indigo
-        Kind::Java => ("\u{e738}", (0xb0, 0x72, 0x19)),     //  java brown
-        Kind::Kotlin => ("\u{e634}", (0xa9, 0x7b, 0xff)),   //  kotlin purple
-        Kind::Swift => ("\u{e755}", (0xf0, 0x51, 0x38)),    //  swift orange
-        Kind::Lua => ("\u{e620}", (0x51, 0xa0, 0xcf)),      //  lua blue
-        Kind::Sql => ("\u{e706}", (0xf2, 0x91, 0x11)),      //  db orange
-        Kind::Data => ("\u{f1c3}", (0x33, 0xa8, 0x52)),     //  sheet green
-        Kind::Text => ("\u{f15c}", (0x9e, 0x9e, 0x9e)),     //  text grey
-        Kind::Log => ("\u{f15c}", (0x75, 0x75, 0x75)),      //  log dark grey
-        Kind::Pdf => ("\u{f1c1}", (0xe5, 0x39, 0x35)),      //  pdf red
-        Kind::Image => ("\u{f1c5}", (0x26, 0xa6, 0x9a)),    //  image teal
-        Kind::Audio => ("\u{f1c7}", (0xec, 0x40, 0x7a)),    //  audio pink
-        Kind::Video => ("\u{f1c8}", (0xff, 0x70, 0x43)),    //  video orange
-        Kind::Archive => ("\u{f1c6}", (0xaf, 0xb4, 0x2b)),  //  archive olive
-        Kind::Lock => ("\u{f023}", (0xff, 0xd5, 0x4f)),     //  lock amber
-        Kind::Binary => ("\u{f471}", (0xef, 0x53, 0x50)),   //  binary red
-        Kind::Font => ("\u{f031}", (0xb0, 0xbe, 0xc5)),     //  font grey
+        Kind::CFamily => ("\u{e61d}", (0xf3, 0x4b, 0x7d)), //  c/cpp pink
+        Kind::CSharp => ("\u{f031b}", (0x17, 0x86, 0x00)), // 󰌛 c# green
+        Kind::Go => ("\u{e627}", (0x00, 0xad, 0xd8)),  //  go cyan
+        Kind::Ruby => ("\u{e791}", (0x70, 0x15, 0x16)), //  ruby red
+        Kind::Php => ("\u{e73d}", (0x4f, 0x5d, 0x95)), //  php indigo
+        Kind::Java => ("\u{e738}", (0xb0, 0x72, 0x19)), //  java brown
+        Kind::Kotlin => ("\u{e634}", (0xa9, 0x7b, 0xff)), //  kotlin purple
+        Kind::Swift => ("\u{e755}", (0xf0, 0x51, 0x38)), //  swift orange
+        Kind::Lua => ("\u{e620}", (0x51, 0xa0, 0xcf)), //  lua blue
+        Kind::Sql => ("\u{e706}", (0xf2, 0x91, 0x11)), //  db orange
+        Kind::Data => ("\u{f1c3}", (0x33, 0xa8, 0x52)), //  sheet green
+        Kind::Text => ("\u{f15c}", (0x9e, 0x9e, 0x9e)), //  text grey
+        Kind::Log => ("\u{f15c}", (0x75, 0x75, 0x75)), //  log dark grey
+        Kind::Pdf => ("\u{f1c1}", (0xe5, 0x39, 0x35)), //  pdf red
+        Kind::Image => ("\u{f1c5}", (0x26, 0xa6, 0x9a)), //  image teal
+        Kind::Audio => ("\u{f1c7}", (0xec, 0x40, 0x7a)), //  audio pink
+        Kind::Video => ("\u{f1c8}", (0xff, 0x70, 0x43)), //  video orange
+        Kind::Archive => ("\u{f1c6}", (0xaf, 0xb4, 0x2b)), //  archive olive
+        Kind::Lock => ("\u{f023}", (0xff, 0xd5, 0x4f)), //  lock amber
+        Kind::Binary => ("\u{f471}", (0xef, 0x53, 0x50)), //  binary red
+        Kind::Font => ("\u{f031}", (0xb0, 0xbe, 0xc5)), //  font grey
         Kind::Notebook => ("\u{f02d}", (0xf5, 0x7c, 0x00)), //  notebook orange
-        Kind::Git => ("\u{e702}", (0xf1, 0x4e, 0x32)),      //  git orange-red
-        Kind::Docker => ("\u{f308}", (0x0d, 0xb7, 0xed)),   //  docker blue
-        Kind::Package => ("\u{f487}", (0x8d, 0x6e, 0x63)),  //  package brown
-        Kind::Build => ("\u{f0ad}", (0x6d, 0x80, 0x86)),    //  wrench grey
-        Kind::Readme => ("\u{f02d}", (0x42, 0xa5, 0xf5)),   //  book blue
-        Kind::License => ("\u{f24e}", (0xff, 0xd5, 0x4f)),  //  scale amber
-        Kind::EnvKey => ("\u{f084}", (0xff, 0xd5, 0x4f)),   //  key amber
-        Kind::File => ("\u{f15b}", (0x90, 0xa4, 0xae)),     //  plain file
+        Kind::Git => ("\u{e702}", (0xf1, 0x4e, 0x32)), //  git orange-red
+        Kind::Docker => ("\u{f308}", (0x0d, 0xb7, 0xed)), //  docker blue
+        Kind::Package => ("\u{f487}", (0x8d, 0x6e, 0x63)), //  package brown
+        Kind::Build => ("\u{f0ad}", (0x6d, 0x80, 0x86)), //  wrench grey
+        Kind::Readme => ("\u{f02d}", (0x42, 0xa5, 0xf5)), //  book blue
+        Kind::License => ("\u{f24e}", (0xff, 0xd5, 0x4f)), //  scale amber
+        Kind::EnvKey => ("\u{f084}", (0xff, 0xd5, 0x4f)), //  key amber
+        Kind::File => ("\u{f15b}", (0x90, 0xa4, 0xae)), //  plain file
     }
 }
 
@@ -426,7 +437,11 @@ mod tests {
         let rust = icon(IconTheme::Material, "main.rs", false, false);
         assert_eq!(rust.glyph, "\u{e7a8}");
         assert_eq!(rust.rgb, Some((0xde, 0xa5, 0x84)));
-        assert!(icon(IconTheme::Emoji, "main.rs", false, false).rgb.is_none());
+        assert!(
+            icon(IconTheme::Emoji, "main.rs", false, false)
+                .rgb
+                .is_none()
+        );
     }
 
     #[test]
@@ -434,19 +449,23 @@ mod tests {
         assert!(output_mentions_nerd_font(
             r"CaskaydiaCove NF Mono (TrueType)    REG_SZ    C:\x\CaskaydiaCoveNerdFontMono-Regular.ttf"
         ));
-        assert!(output_mentions_nerd_font("JetBrainsMono Nerd Font: style=Regular"));
-        assert!(output_mentions_nerd_font("FiraCode Nerd Font: style=Regular"));
+        assert!(output_mentions_nerd_font(
+            "JetBrainsMono Nerd Font: style=Regular"
+        ));
+        assert!(output_mentions_nerd_font(
+            "FiraCode Nerd Font: style=Regular"
+        ));
         assert!(output_mentions_nerd_font("FiraCode NF Retina (TrueType)"));
         assert!(output_mentions_nerd_font("FiraCodeNF-Regular.ttf"));
-        assert!(!output_mentions_nerd_font("Consolas (TrueType)  Segoe UI  Cascadia Mono"));
+        assert!(!output_mentions_nerd_font(
+            "Consolas (TrueType)  Segoe UI  Cascadia Mono"
+        ));
     }
 
     #[test]
     fn font_directory_probe_checks_file_names_without_platform_tools() {
-        let root = std::env::temp_dir().join(format!(
-            "herdr-sidebar-font-probe-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("herdr-sidebar-font-probe-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("FiraCodeNF-Regular.ttf"), []).unwrap();
@@ -457,14 +476,20 @@ mod tests {
     #[test]
     fn theme_selection_from_env_and_toggle() {
         assert_eq!(IconTheme::from_env(None), None);
-        assert_eq!(IconTheme::from_env(Some("material")), Some(IconTheme::Material));
+        assert_eq!(
+            IconTheme::from_env(Some("material")),
+            Some(IconTheme::Material)
+        );
         assert_eq!(IconTheme::from_env(Some(" EMOJI ")), Some(IconTheme::Emoji));
         // Env beats persisted; persisted beats the font probe.
         assert_eq!(
             IconTheme::resolve(Some("emoji"), Some(IconTheme::Material)),
             IconTheme::Emoji
         );
-        assert_eq!(IconTheme::resolve(None, Some(IconTheme::Emoji)), IconTheme::Emoji);
+        assert_eq!(
+            IconTheme::resolve(None, Some(IconTheme::Emoji)),
+            IconTheme::Emoji
+        );
         assert_eq!(IconTheme::Emoji.toggled(), IconTheme::Material);
         assert_eq!(IconTheme::Material.toggled(), IconTheme::Emoji);
     }

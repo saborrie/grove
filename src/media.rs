@@ -22,8 +22,8 @@ pub fn classify(path: &Path) -> Kind {
     match ext.as_str() {
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif" | "ico" | "avif"
         | "heic" | "heif" | "jxl" | "ppm" | "pgm" => Kind::Image,
-        "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v" | "wmv" | "flv" | "mpg" | "mpeg"
-        | "ts" | "ogv" => Kind::Video,
+        "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v" | "wmv" | "flv" | "mpg" | "mpeg" | "ts"
+        | "ogv" => Kind::Video,
         "pdf" => Kind::Pdf,
         "mp3" | "flac" | "wav" | "ogg" | "m4a" | "aac" | "opus" | "wma" => Kind::Audio,
         _ => Kind::Other,
@@ -52,7 +52,10 @@ fn fit(source: (u32, u32), max_cells: (u16, u16), cell: (u32, u32)) -> (u16, u16
     if source.0 == 0 || source.1 == 0 || max_cells.0 == 0 || max_cells.1 == 0 {
         return (1, 1);
     }
-    let max_px = (u32::from(max_cells.0) * cell.0, u32::from(max_cells.1) * cell.1);
+    let max_px = (
+        u32::from(max_cells.0) * cell.0,
+        u32::from(max_cells.1) * cell.1,
+    );
     let scale = (f64::from(max_px.0) / f64::from(source.0))
         .min(f64::from(max_px.1) / f64::from(source.1))
         .min(1.0);
@@ -104,7 +107,12 @@ pub fn thumbnail(
     image::DynamicImage::ImageRgba8(canvas)
         .write_to(&mut png, image::ImageFormat::Png)
         .map_err(|e| format!("encode failed: {e}"))?;
-    Ok(Thumb { png: png.into_inner(), size, cells, source })
+    Ok(Thumb {
+        png: png.into_inner(),
+        size,
+        cells,
+        source,
+    })
 }
 
 /// The `image` crate first; ffmpeg picks up the formats it was not built for
@@ -158,7 +166,14 @@ fn pdf_page(path: &Path) -> Result<Vec<u8>, String> {
 
 fn ffprobe(path: &Path, field: &str) -> Option<String> {
     let output = Command::new("ffprobe")
-        .args(["-v", "error", "-show_entries", field, "-of", "default=nw=1:nk=1"])
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            field,
+            "-of",
+            "default=nw=1:nk=1",
+        ])
         .arg(path)
         .stderr(Stdio::null())
         .output()
@@ -168,14 +183,22 @@ fn ffprobe(path: &Path, field: &str) -> Option<String> {
 }
 
 fn duration(path: &Path) -> Option<f64> {
-    ffprobe(path, "format=duration")?.lines().next()?.parse().ok()
+    ffprobe(path, "format=duration")?
+        .lines()
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// The lines under the picture: what it is, how big, how long.
 pub fn details(path: &Path, kind: Kind) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(meta) = std::fs::metadata(path) {
-        out.push(format!("{}  ·  {}", kind_label(kind), human_size(meta.len())));
+        out.push(format!(
+            "{}  ·  {}",
+            kind_label(kind),
+            human_size(meta.len())
+        ));
     }
     match kind {
         Kind::Video | Kind::Audio => {
@@ -198,7 +221,11 @@ pub fn details(path: &Path, kind: Kind) -> Vec<String> {
 }
 
 fn pdf_pages(path: &Path) -> Option<String> {
-    let output = Command::new("pdfinfo").arg(path).stderr(Stdio::null()).output().ok()?;
+    let output = Command::new("pdfinfo")
+        .arg(path)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .find_map(|l| l.strip_prefix("Pages:").map(|v| v.trim().to_string()))
@@ -217,7 +244,11 @@ fn kind_label(kind: Kind) -> &'static str {
 fn clock(secs: f64) -> String {
     let total = secs.round() as u64;
     let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 pub fn human_size(bytes: u64) -> String {
@@ -228,7 +259,11 @@ pub fn human_size(bytes: u64) -> String {
         size /= 1024.0;
         unit += 1;
     }
-    if unit == 0 { format!("{bytes} B") } else { format!("{size:.1} {}", UNITS[unit]) }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{size:.1} {}", UNITS[unit])
+    }
 }
 
 #[cfg(test)]
@@ -254,7 +289,10 @@ mod tests {
             let canvas = (u32::from(cells.0) * cell.0, u32::from(cells.1) * cell.1);
             let placed = (u32::from(cells.0) * cell.0, u32::from(cells.1) * cell.1);
             assert_eq!(canvas, placed, "{source:?}");
-            assert!(cells.0 <= 40 && cells.1 <= 20, "{source:?} overflowed the pane");
+            assert!(
+                cells.0 <= 40 && cells.1 <= 20,
+                "{source:?} overflowed the pane"
+            );
             assert!(cells.0 >= 1 && cells.1 >= 1, "{source:?} vanished");
         }
     }

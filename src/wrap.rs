@@ -93,7 +93,11 @@ fn row_from(cells: &[(char, Style)], line_style: Style) -> Line<'static> {
 }
 
 fn char_width(c: char, x: usize) -> usize {
-    if c == '\t' { TAB_WIDTH - (x % TAB_WIDTH) } else { c.width().unwrap_or(0) }
+    if c == '\t' {
+        TAB_WIDTH - (x % TAB_WIDTH)
+    } else {
+        c.width().unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -102,7 +106,9 @@ mod tests {
     use ratatui::style::{Color, Stylize};
 
     fn texts(rows: &[Line<'static>]) -> Vec<String> {
-        rows.iter().map(|r| r.spans.iter().map(|s| s.content.as_ref()).collect()).collect()
+        rows.iter()
+            .map(|r| r.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
     }
 
     #[test]
@@ -133,7 +139,11 @@ mod tests {
     fn indentation_is_preserved_not_trimmed() {
         let line = Line::raw("        let value = compute();");
         let rows = wrap_line(&line, 16);
-        assert!(rows[0].spans[0].content.starts_with("        "), "{:?}", texts(&rows));
+        assert!(
+            rows[0].spans[0].content.starts_with("        "),
+            "{:?}",
+            texts(&rows)
+        );
         assert_eq!(texts(&rows).concat(), "        let value = compute();");
     }
 
@@ -148,8 +158,11 @@ mod tests {
         // The red run never bleeds onto the green text.
         for row in &rows {
             for span in &row.spans {
-                let expected =
-                    if span.content.contains('a') { Color::Red } else { Color::Green };
+                let expected = if span.content.contains('a') {
+                    Color::Red
+                } else {
+                    Color::Green
+                };
                 assert_eq!(span.style.fg, Some(expected), "{:?}", span.content);
             }
         }

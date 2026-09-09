@@ -28,9 +28,17 @@ impl Herdr {
     pub fn from_env() -> Option<Self> {
         let socket = std::env::var("HERDR_SOCKET_PATH").ok()?;
         let pane = std::env::var("HERDR_PANE_ID").ok()?;
-        let herdr = Self { socket, pane, seq: Cell::new(0), cell: (10, 20) };
+        let herdr = Self {
+            socket,
+            pane,
+            seq: Cell::new(0),
+            cell: (10, 20),
+        };
         let (w, h) = herdr.cell_size()?;
-        Some(Self { cell: (w, h), ..herdr })
+        Some(Self {
+            cell: (w, h),
+            ..herdr
+        })
     }
 
     fn call(&self, method: &str, params: serde_json::Value) -> Option<serde_json::Value> {
@@ -41,7 +49,9 @@ impl Herdr {
             "params": params,
         });
         let mut stream = UnixStream::connect(&self.socket).ok()?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok()?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .ok()?;
         stream.write_all(format!("{request}\n").as_bytes()).ok()?;
         let mut line = String::new();
         BufReader::new(&stream).read_line(&mut line).ok()?;
@@ -50,7 +60,10 @@ impl Herdr {
     }
 
     fn cell_size(&self) -> Option<(u32, u32)> {
-        let info = self.call("pane.graphics.info", serde_json::json!({ "pane_id": self.pane }))?;
+        let info = self.call(
+            "pane.graphics.info",
+            serde_json::json!({ "pane_id": self.pane }),
+        )?;
         let w = info.get("cell_width_px")?.as_u64()? as u32;
         let h = info.get("cell_height_px")?.as_u64()? as u32;
         (w > 0 && h > 0).then_some((w, h))

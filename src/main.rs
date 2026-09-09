@@ -107,10 +107,10 @@ impl App {
     fn rebuild(&mut self) {
         let keep = self.current().map(|r| r.path.clone());
         self.rows = self.tree.rows();
-        if let Some(path) = keep {
-            if let Some(index) = self.rows.iter().position(|r| r.path == path) {
-                self.selected = index;
-            }
+        if let Some(path) = keep
+            && let Some(index) = self.rows.iter().position(|r| r.path == path)
+        {
+            self.selected = index;
         }
         self.selected = self.selected.min(self.rows.len().saturating_sub(1));
     }
@@ -148,7 +148,10 @@ impl App {
         if depth == 0 {
             return;
         }
-        if let Some(parent) = self.rows[..self.selected].iter().rposition(|r| r.depth < depth) {
+        if let Some(parent) = self.rows[..self.selected]
+            .iter()
+            .rposition(|r| r.depth < depth)
+        {
             self.selected = parent;
             self.stale = true;
             self.follow = true;
@@ -190,9 +193,17 @@ impl App {
             self.trouble = Some("no picture outside herdr — run grove in a herdr pane".into());
             return;
         };
-        match media::thumbnail(&row.path, kind, (self.body.width, self.body.height), herdr.cell) {
+        match media::thumbnail(
+            &row.path,
+            kind,
+            (self.body.width, self.body.height),
+            herdr.cell,
+        ) {
             Ok(thumb) => {
-                self.doc.info = format!("{} × {}   {}", thumb.source.0, thumb.source.1, self.doc.info);
+                self.doc.info = format!(
+                    "{} × {}   {}",
+                    thumb.source.0, thumb.source.1, self.doc.info
+                );
                 self.thumb = Some((row.path.clone(), thumb));
                 self.thumb_body = self.body;
             }
@@ -211,9 +222,13 @@ impl App {
         }
         let action = picture_action(
             self.stale,
-            self.thumb.as_ref().map(|(path, thumb)| (path.as_path(), thumb.cells)),
+            self.thumb
+                .as_ref()
+                .map(|(path, thumb)| (path.as_path(), thumb.cells)),
             self.body,
-            self.placed.as_ref().map(|(path, rect)| (path.as_path(), *rect)),
+            self.placed
+                .as_ref()
+                .map(|(path, rect)| (path.as_path(), *rect)),
         );
         match action {
             Picture::Leave => {}
@@ -236,9 +251,12 @@ impl App {
             .clamp(TREE_MIN, TREE_MAX)
             .min(area.width.saturating_sub(PREVIEW_MIN))
             .max(1);
-        let columns =
-            Layout::horizontal([Constraint::Length(tree_width), Constraint::Length(1), Constraint::Min(0)])
-                .split(area);
+        let columns = Layout::horizontal([
+            Constraint::Length(tree_width),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(area);
         self.draw_tree(frame, columns[0]);
         frame.render_widget(
             Paragraph::new(vec![Line::raw("│"); usize::from(area.height)])
@@ -254,11 +272,17 @@ impl App {
         }
         let header = Line::from(Span::styled(
             format!(" {}", self.tree.root_name()),
-            Style::default().fg(theme::chrome()).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::chrome())
+                .add_modifier(Modifier::BOLD),
         ));
         frame.render_widget(Paragraph::new(header), Rect { height: 1, ..area });
 
-        let body = Rect { y: area.y + 1, height: area.height - 1, ..area };
+        let body = Rect {
+            y: area.y + 1,
+            height: area.height - 1,
+            ..area
+        };
         self.tree_body = body;
         let height = usize::from(body.height);
         if self.follow {
@@ -270,7 +294,9 @@ impl App {
             }
         }
         // Never scroll past the last row, however the offset got there.
-        self.offset = self.offset.min(self.rows.len().saturating_sub(height.max(1)));
+        self.offset = self
+            .offset
+            .min(self.rows.len().saturating_sub(height.max(1)));
 
         let lines: Vec<Line> = self
             .rows
@@ -289,7 +315,9 @@ impl App {
         }
         let mut header = vec![Span::styled(
             format!(" {}", self.doc.title),
-            Style::default().fg(theme::chrome()).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::chrome())
+                .add_modifier(Modifier::BOLD),
         )];
         if !self.doc.info.is_empty() {
             header.push(Span::styled(
@@ -297,7 +325,10 @@ impl App {
                 Style::default().fg(theme::dim()),
             ));
         }
-        frame.render_widget(Paragraph::new(Line::from(header)), Rect { height: 1, ..area });
+        frame.render_widget(
+            Paragraph::new(Line::from(header)),
+            Rect { height: 1, ..area },
+        );
 
         let body = Rect {
             x: area.x + 1,
@@ -322,7 +353,12 @@ impl App {
         }
         let scroll = self.doc.scroll;
         let rows = self.doc.rows(body.width);
-        let visible: Vec<Line> = rows.iter().skip(scroll).take(usize::from(body.height)).cloned().collect();
+        let visible: Vec<Line> = rows
+            .iter()
+            .skip(scroll)
+            .take(usize::from(body.height))
+            .cloned()
+            .collect();
         frame.render_widget(Paragraph::new(visible), body);
     }
 
@@ -362,7 +398,9 @@ impl App {
                     _ => {}
                 }
             }
-            Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) => {
+            Event::Mouse(mouse)
+                if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) =>
+            {
                 self.click(mouse.column, mouse.row);
             }
             Event::Mouse(mouse) => {
@@ -478,18 +516,50 @@ fn tree_line(row: &Row, icons: IconTheme, selected: bool, width: u16) -> Line<'s
         // Pad to the full width so the highlight reads as a row, not a label.
         let used = line.width();
         if used < usize::from(width) {
-            line.spans.push(Span::raw(" ".repeat(usize::from(width) - used)));
+            line.spans
+                .push(Span::raw(" ".repeat(usize::from(width) - used)));
         }
         line.style = Style::default().bg(theme::selection_bg());
     }
     line
 }
 
+const HELP: &str = "\
+grove — a file tree pinned to one root, with live previews, in one herdr pane
+
+USAGE:
+    grove [PATH]        Open the tree rooted at PATH (default: the current directory)
+
+OPTIONS:
+    -h, --help          Print this help
+    -V, --version       Print the version
+
+KEYS:
+    Up/Down             Move
+    Right               Expand a folder
+    Left                Collapse it, or step out to the parent
+    Enter               Toggle a folder, or re-read the selected file
+    Ctrl+C              Quit
+
+    Click selects a row (a folder folds); the wheel scrolls whichever half it is over.
+
+Pictures are drawn through herdr's pane graphics API, so run grove in a herdr pane.
+";
+
 fn main() -> io::Result<()> {
-    let root = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or(std::env::current_dir()?);
+    let first = std::env::args().nth(1);
+    match first.as_deref() {
+        Some("-V" | "--version") => {
+            println!("grove {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Some("-h" | "--help") => {
+            print!("{HELP}");
+            return Ok(());
+        }
+        _ => {}
+    }
+    let root = first.map(PathBuf::from).unwrap_or(std::env::current_dir()?);
     let root = root.canonicalize().unwrap_or(root);
     let mut app = App::new(root);
 
@@ -544,8 +614,18 @@ mod tests {
         assert_eq!(row_at(BODY, 0, 2, 3, 4), None, "past the last row");
     }
 
-    const BODY: Rect = Rect { x: 0, y: 1, width: 20, height: 5 };
-    const PANE: Rect = Rect { x: 20, y: 1, width: 40, height: 20 };
+    const BODY: Rect = Rect {
+        x: 0,
+        y: 1,
+        width: 20,
+        height: 5,
+    };
+    const PANE: Rect = Rect {
+        x: 20,
+        y: 1,
+        width: 40,
+        height: 20,
+    };
 
     /// The regression: arrowing from one image straight to another used to
     /// publish the FIRST image under the second one's name, and then sit there.
@@ -555,11 +635,21 @@ mod tests {
         let new = Path::new("/pics/gradient.png");
         // Cursor has moved to `new`; the loaded thumbnail is still `old`.
         assert_eq!(
-            picture_action(true, Some((old, (13, 6))), PANE, Some((old, centre(PANE, (13, 6))))),
+            picture_action(
+                true,
+                Some((old, (13, 6))),
+                PANE,
+                Some((old, centre(PANE, (13, 6))))
+            ),
             Picture::Leave,
         );
         // Once the load catches up, the new picture goes up on its own rectangle.
-        let action = picture_action(false, Some((new, (40, 12))), PANE, Some((old, centre(PANE, (13, 6)))));
+        let action = picture_action(
+            false,
+            Some((new, (40, 12))),
+            PANE,
+            Some((old, centre(PANE, (13, 6)))),
+        );
         assert_eq!(action, Picture::Show(centre(PANE, (40, 12))));
     }
 
@@ -567,13 +657,21 @@ mod tests {
     fn an_unchanged_picture_is_not_resent() {
         let path = Path::new("/pics/badge.png");
         let rect = centre(PANE, (13, 6));
-        assert_eq!(picture_action(false, Some((path, (13, 6))), PANE, Some((path, rect))), Picture::Leave);
+        assert_eq!(
+            picture_action(false, Some((path, (13, 6))), PANE, Some((path, rect))),
+            Picture::Leave
+        );
     }
 
     #[test]
     fn a_moved_rectangle_republishes_the_same_picture() {
         let path = Path::new("/pics/badge.png");
-        let stale_rect = Rect { x: 99, y: 99, width: 1, height: 1 };
+        let stale_rect = Rect {
+            x: 99,
+            y: 99,
+            width: 1,
+            height: 1,
+        };
         assert_eq!(
             picture_action(false, Some((path, (13, 6))), PANE, Some((path, stale_rect))),
             Picture::Show(centre(PANE, (13, 6))),
@@ -583,15 +681,31 @@ mod tests {
     #[test]
     fn moving_onto_a_text_file_takes_the_picture_down() {
         let path = Path::new("/pics/badge.png");
-        assert_eq!(picture_action(false, None, PANE, Some((path, centre(PANE, (13, 6))))), Picture::Hide);
+        assert_eq!(
+            picture_action(false, None, PANE, Some((path, centre(PANE, (13, 6))))),
+            Picture::Hide
+        );
         assert_eq!(picture_action(false, None, PANE, None), Picture::Leave);
     }
 
     #[test]
     fn a_picture_is_centred_without_ever_leaving_the_body() {
-        let body = Rect { x: 10, y: 2, width: 40, height: 20 };
+        let body = Rect {
+            x: 10,
+            y: 2,
+            width: 40,
+            height: 20,
+        };
         let placed = centre(body, (40, 12));
-        assert_eq!(placed, Rect { x: 10, y: 6, width: 40, height: 12 });
+        assert_eq!(
+            placed,
+            Rect {
+                x: 10,
+                y: 6,
+                width: 40,
+                height: 12
+            }
+        );
         // A picture that would overflow is clipped to the body, not pushed out.
         let big = centre(body, (60, 30));
         assert!(big.x >= body.x && big.y >= body.y);

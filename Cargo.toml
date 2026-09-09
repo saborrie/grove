@@ -36,3 +36,8 @@ base64 = "0.22"
 
 [profile.release]
 opt-level = 2
+# Smaller, faster binaries for the release tarballs; the build is short enough
+# that one codegen unit and thin LTO cost nothing worth measuring.
+lto = "thin"
+codegen-units = 1
+strip = true

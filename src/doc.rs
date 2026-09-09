@@ -85,19 +85,29 @@ impl Doc {
             })
             .unwrap_or_default();
         crate::tree::sort_entries(&mut entries);
-        let (dirs, files) = entries.iter().fold((0, 0), |(d, f), e| {
-            if e.is_dir { (d + 1, f) } else { (d, f + 1) }
-        });
+        let (dirs, files) =
+            entries.iter().fold(
+                (0, 0),
+                |(d, f), e| {
+                    if e.is_dir { (d + 1, f) } else { (d, f + 1) }
+                },
+            );
         let lines: Vec<Line<'static>> = entries
             .iter()
             .map(|e| {
                 let style = if e.is_dir {
-                    Style::default().fg(theme::chrome()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::chrome())
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::dim())
                 };
                 Line::from(Span::styled(
-                    if e.is_dir { format!("{}/", e.name) } else { e.name.clone() },
+                    if e.is_dir {
+                        format!("{}/", e.name)
+                    } else {
+                        e.name.clone()
+                    },
                     style,
                 ))
             })
@@ -119,9 +129,12 @@ impl Doc {
             Ok(bytes) => {
                 let truncated = bytes.len() > MAX_BYTES;
                 let text = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_BYTES)]);
-                let mut lines = crate::syntax::highlight(&name, &text, MAX_LINES)
-                    .unwrap_or_else(|| {
-                        text.lines().take(MAX_LINES).map(|l| Line::raw(l.to_string())).collect()
+                let mut lines =
+                    crate::syntax::highlight(&name, &text, MAX_LINES).unwrap_or_else(|| {
+                        text.lines()
+                            .take(MAX_LINES)
+                            .map(|l| Line::raw(l.to_string()))
+                            .collect()
                     });
                 if truncated || text.lines().count() > MAX_LINES {
                     lines.push(Line::styled(
@@ -130,7 +143,10 @@ impl Doc {
                     ));
                 }
                 if lines.is_empty() {
-                    lines.push(Line::styled("(empty file)", Style::default().fg(theme::dim())));
+                    lines.push(Line::styled(
+                        "(empty file)",
+                        Style::default().fg(theme::dim()),
+                    ));
                 }
                 (lines, true)
             }
@@ -213,7 +229,11 @@ mod tests {
         let lines = vec![Line::raw("aaaa bbbb cccc")];
         let rows = build_rows(&lines, true, 8);
         assert!(rows[0].to_string().starts_with("1 "));
-        assert!(rows[1].to_string().starts_with("  "), "{:?}", rows[1].to_string());
+        assert!(
+            rows[1].to_string().starts_with("  "),
+            "{:?}",
+            rows[1].to_string()
+        );
     }
 
     #[test]
