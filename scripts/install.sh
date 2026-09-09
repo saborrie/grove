@@ -9,87 +9,97 @@
 #
 # POSIX sh on purpose: this is the one file that has to run before anything
 # else is known to be present.
+#
+# Everything lives in main(), called on the very last line. Piped into `sh`, the
+# shell executes commands as they arrive off the socket — so a download that
+# truncates half way would run half a script. Nothing runs here until the
+# closing call has been read, which cannot happen unless the whole file arrived.
 
 set -eu
-
-REPO="saborrie/grove"
-BIN="grove"
-VERSION="${GROVE_VERSION:-latest}"
-INSTALL_DIR="${GROVE_INSTALL_DIR:-$HOME/.local/bin}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"; }
 
-need curl
-need tar
+main() {
+    REPO="saborrie/grove"
+    BIN="grove"
+    VERSION="${GROVE_VERSION:-latest}"
+    INSTALL_DIR="${GROVE_INSTALL_DIR:-$HOME/.local/bin}"
 
-# --- 1. platform -------------------------------------------------------------
+    need curl
+    need tar
 
-os="$(uname -s)"
-[ "$os" = "Linux" ] || die "the released binaries are Linux only (this is $os).
-Build from source instead: https://github.com/${REPO}#from-source"
+    # --- 1. platform -------------------------------------------------------------
 
-case "$(uname -m)" in
-    x86_64 | amd64) target="x86_64-unknown-linux-musl" ;;
-    aarch64 | arm64) target="aarch64-unknown-linux-musl" ;;
-    *) die "unsupported architecture: $(uname -m)" ;;
-esac
+    os="$(uname -s)"
+    [ "$os" = "Linux" ] || die "the released binaries are Linux only (this is $os).
+    Build from source instead: https://github.com/${REPO}#from-source"
 
-# --- 2. version --------------------------------------------------------------
+    case "$(uname -m)" in
+        x86_64 | amd64) target="x86_64-unknown-linux-musl" ;;
+        aarch64 | arm64) target="aarch64-unknown-linux-musl" ;;
+        *) die "unsupported architecture: $(uname -m)" ;;
+    esac
 
-if [ "$VERSION" = "latest" ]; then
-    VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-        | grep -m1 '"tag_name":' | cut -d'"' -f4)"
-    [ -n "$VERSION" ] || die "could not work out the latest version — set GROVE_VERSION"
-fi
+    # --- 2. version --------------------------------------------------------------
 
-asset="${BIN}-${VERSION}-${target}.tar.gz"
-url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+    if [ "$VERSION" = "latest" ]; then
+        VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+            | grep -m1 '"tag_name":' | cut -d'"' -f4)"
+        [ -n "$VERSION" ] || die "could not work out the latest version — set GROVE_VERSION"
+    fi
 
-# --- 3. download and verify --------------------------------------------------
+    asset="${BIN}-${VERSION}-${target}.tar.gz"
+    url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
 
-tmp="$(mktemp -d)"
-# shellcheck disable=SC2064
-trap "rm -rf '$tmp'" EXIT INT TERM
+    # --- 3. download and verify --------------------------------------------------
 
-say "==> downloading grove ${VERSION} (${target})"
-curl -fsSL --retry 3 -o "${tmp}/${asset}" "$url" \
-    || die "no such release: $url"
-curl -fsSL --retry 3 -o "${tmp}/${asset}.sha256" "${url}.sha256" \
-    || die "release is missing its checksum — refusing to install"
+    tmp="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp'" EXIT INT TERM
 
-if command -v sha256sum >/dev/null 2>&1; then
-    (cd "$tmp" && sha256sum -c "${asset}.sha256" >/dev/null) \
-        || die "checksum mismatch — the download is not what the release says it is"
-    say "==> checksum ok"
-else
-    say "==> sha256sum not available, skipping verification"
-fi
+    say "==> downloading grove ${VERSION} (${target})"
+    curl -fsSL --retry 3 -o "${tmp}/${asset}" "$url" \
+        || die "no such release: $url"
+    curl -fsSL --retry 3 -o "${tmp}/${asset}.sha256" "${url}.sha256" \
+        || die "release is missing its checksum — refusing to install"
 
-tar -xzf "${tmp}/${asset}" -C "$tmp"
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd "$tmp" && sha256sum -c "${asset}.sha256" >/dev/null) \
+            || die "checksum mismatch — the download is not what the release says it is"
+        say "==> checksum ok"
+    else
+        say "==> sha256sum not available, skipping verification"
+    fi
 
-# --- 4. install --------------------------------------------------------------
+    tar -xzf "${tmp}/${asset}" -C "$tmp"
 
-mkdir -p "$INSTALL_DIR"
-install -m 755 "${tmp}/${BIN}-${VERSION}-${target}/${BIN}" "${INSTALL_DIR}/${BIN}" 2>/dev/null \
-    || { cp "${tmp}/${BIN}-${VERSION}-${target}/${BIN}" "${INSTALL_DIR}/${BIN}" && chmod 755 "${INSTALL_DIR}/${BIN}"; }
+    # --- 4. install --------------------------------------------------------------
 
-say "==> installed $("${INSTALL_DIR}/${BIN}" --version) to ${INSTALL_DIR}/${BIN}"
+    mkdir -p "$INSTALL_DIR"
+    install -m 755 "${tmp}/${BIN}-${VERSION}-${target}/${BIN}" "${INSTALL_DIR}/${BIN}" 2>/dev/null \
+        || { cp "${tmp}/${BIN}-${VERSION}-${target}/${BIN}" "${INSTALL_DIR}/${BIN}" && chmod 755 "${INSTALL_DIR}/${BIN}"; }
 
-# --- 5. what to do next ------------------------------------------------------
+    say "==> installed $("${INSTALL_DIR}/${BIN}" --version) to ${INSTALL_DIR}/${BIN}"
 
-case ":${PATH}:" in
-    *":${INSTALL_DIR}:"*) ;;
-    *)
+    # --- 5. what to do next ------------------------------------------------------
+
+    case ":${PATH}:" in
+        *":${INSTALL_DIR}:"*) ;;
+        *)
+            say ""
+            say "${INSTALL_DIR} is not on your PATH. Add this to your shell profile:"
+            say "    export PATH=\"${INSTALL_DIR}:\$PATH\""
+            ;;
+    esac
+
+    if [ -z "${HERDR_PANE_ID:-}" ]; then
         say ""
-        say "${INSTALL_DIR} is not on your PATH. Add this to your shell profile:"
-        say "    export PATH=\"${INSTALL_DIR}:\$PATH\""
-        ;;
-esac
+        say "grove draws its previews through herdr's pane graphics API, so run it"
+        say "in a herdr pane — outside one you get the tree and text, but no pictures."
+    fi
+}
 
-if [ -z "${HERDR_PANE_ID:-}" ]; then
-    say ""
-    say "grove draws its previews through herdr's pane graphics API, so run it"
-    say "in a herdr pane — outside one you get the tree and text, but no pictures."
-fi
+# Read the whole script before running any of it — see the note at the top.
+main "$@"
