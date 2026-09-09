@@ -8,9 +8,10 @@ OUT="${OUT:-/out/demo.png}"
 WIDTH="${WIDTH:-1500}"
 HEIGHT="${HEIGHT:-860}"
 SCENARIO="${SCENARIO:-image}"
-# herdr's own sidebar occupies the left of the window. It is not what the shot is
-# about, so it is cropped off; set to 0 to keep the whole herdr frame.
-CROP_LEFT="${CROP_LEFT:-300}"
+# Pixels of herdr's own frame to crop off the left. Zero by default: grove is a
+# herdr program, and a shot of it sitting in a herdr session says so without a
+# caption.
+CROP_LEFT="${CROP_LEFT:-0}"
 FIXTURE=/work/demo-project
 
 IM="$(command -v magick || command -v convert)"

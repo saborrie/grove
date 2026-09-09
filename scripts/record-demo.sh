@@ -17,7 +17,7 @@
 #
 # Environment:
 #   WIDTH / HEIGHT   window size in pixels (default 1500x860)
-#   CROP_LEFT        pixels of herdr chrome to crop (default 300; 0 keeps it all)
+#   CROP_LEFT        pixels of herdr's frame to crop off the left (default 0)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

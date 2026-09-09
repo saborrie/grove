@@ -173,6 +173,10 @@ herdr, a Nerd Font and grove, brings up a virtual X display, runs herdr inside a
 real kitty on it, runs grove inside that, walks the tree with arrow keys and
 photographs the X root window.
 
+The shots keep herdr's own frame — the spaces sidebar and the tab bar — because
+grove is a herdr program and a picture of it sitting in a herdr session says so
+without a caption. `CROP_LEFT=300` trims it off if you want grove alone.
+
 It has to work that way. The usual approach — asciinema plus a renderer like agg —
 records the escape-sequence stream, and grove's previews are not in it: herdr
 composites them as kitty graphics outside the text grid. A recording would show
