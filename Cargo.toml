@@ -2,7 +2,7 @@
 name = "grove"
 version = "0.1.0"
 edition = "2024"
-description = "A pinned file tree with live previews, in one terminal pane"
+description = "A file tree pinned to one root, with live previews, in a single herdr pane"
 authors = ["Steven Borrie"]
 repository = "https://github.com/saborrie/grove"
 readme = "README.md"

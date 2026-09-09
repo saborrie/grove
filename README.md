@@ -1,6 +1,6 @@
 # grove
 
-**A file tree pinned to one root, with live previews, in a single terminal pane.**
+**A file tree pinned to one root, with live previews, in a single herdr pane.**
 
 ```
 ┌─ grove ───────┬─ gradient.png   640 × 400   image · 3.9 KB ─┐
@@ -16,6 +16,12 @@
 ```
 
 Yazi's previews and a VS Code tree, and nothing else at all.
+
+> **grove is built for [herdr](https://herdr.dev).** Pictures are drawn through
+> herdr's pane graphics API, so herdr is what makes the previews possible — and
+> the previews are the point. Run grove in a herdr pane. Outside one it still
+> starts, and you get the tree, the keys and text previews, but every image,
+> video and PDF degrades to a text card.
 
 ## Why "grove"?
 
@@ -35,6 +41,9 @@ lives inside an editor.
 
 grove is the small intersection: the tree shape, one fixed root, and real pictures.
 
+- **Made for a herdr pane.** No plugin manifest, no install step, no hooks — it is
+  a plain binary you run in whichever pane you happen to be in, and it stays in
+  that one pane.
 - **The root never moves.** It is wherever you launched grove (`grove [path]`), not
   wherever a neighbouring shell wandered off to. Point it at a directory full of
   repos and worktrees and it stays pointed there.
@@ -61,16 +70,20 @@ There is nothing else to learn, and nothing else to accidentally press.
 
 ## Pictures
 
-Images go through herdr's pane graphics API (`pane.graphics.set`), so herdr owns
-the kitty protocol, the outer terminal and the SSH bridge — grove just hands over
-a PNG and a cell rectangle. Previews therefore work unchanged over `herdr --remote`
-and on mobile clients.
+**This is the part that requires herdr.** Images go through herdr's pane graphics
+API (`pane.graphics.set`), so herdr owns the kitty protocol, the outer terminal
+and the SSH bridge — grove just hands over a PNG and a cell rectangle. That is why
+grove needs no graphics stack of its own, no terminal capability detection and no
+temp files, and why previews work unchanged over `herdr --remote` and on mobile
+clients.
+
+It also means grove draws no pictures anywhere else. Outside a herdr pane the tree,
+the keys and text previews all work, and media files show a text card explaining
+why — useful enough to debug with, but not what grove is for.
 
 The canvas is padded to a whole number of cells and placed on a rectangle of
 exactly that shape, so pictures keep their aspect ratio instead of stretching to
 fill the pane, and are never upscaled past their own resolution.
-
-Outside a herdr pane, media files fall back to a text card.
 
 | Kind | Needs | Notes |
 | --- | --- | --- |
@@ -84,6 +97,9 @@ Each is optional. Without one, that file type shows the reason instead of a pict
 
 ## Install
 
+Requires [herdr](https://herdr.dev) (0.8 or newer, with pane graphics left on —
+they are on by default) and a Rust toolchain to build.
+
 ```sh
 git clone https://github.com/saborrie/grove
 cd grove
@@ -91,11 +107,17 @@ cargo build --release
 install -m755 target/release/grove ~/.local/bin/
 ```
 
-Then run it in any pane:
+Then run it in any herdr pane:
 
 ```sh
 grove            # rooted here
 grove ~/work     # rooted there
+```
+
+Split a pane for it and leave it there — that is the intended shape:
+
+```sh
+herdr pane split --current --direction right --ratio 0.5
 ```
 
 ## Configuration
