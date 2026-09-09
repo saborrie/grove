@@ -7,6 +7,9 @@ authors = ["Steven Borrie"]
 repository = "https://github.com/saborrie/grove"
 readme = "README.md"
 keywords = ["tui", "file-manager", "herdr", "preview"]
+# let-chains and edition 2024; cargo then explains a too-old toolchain instead
+# of failing with a syntax error.
+rust-version = "1.88"
 license = "MIT"
 
 [[bin]]

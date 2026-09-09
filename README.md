@@ -2,6 +2,10 @@
 
 **A file tree pinned to one root, with live previews, in a single herdr pane.**
 
+[![ci](https://github.com/saborrie/grove/actions/workflows/ci.yml/badge.svg)](https://github.com/saborrie/grove/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/saborrie/grove?display_name=tag&sort=semver)](https://github.com/saborrie/grove/releases/latest)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 ```
 ┌─ grove ───────┬─ gradient.png   640 × 400   image · 3.9 KB ─┐
 │  ▸ clips      │                                             │
