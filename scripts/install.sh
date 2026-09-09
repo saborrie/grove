@@ -21,6 +21,28 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"; }
 
+# The newest release tag.
+#
+# Read the body in full before parsing it: piping curl straight into `grep -m1`
+# closes the pipe on the first match, curl dies of EPIPE, and every install
+# prints "curl: (23) Failure writing output to destination" — noise that would
+# also hide a real network failure.
+#
+# The API is the reliable source but is rate limited per IP (60/hour
+# unauthenticated), which shared networks do hit. The releases/latest redirect
+# is not rate limited, so it stands in when the API declines to answer.
+latest_version() {
+    repo="$1"
+    body="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null || true)"
+    version="$(printf '%s\n' "$body" |
+        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n 1p)"
+    if [ -z "$version" ]; then
+        version="$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+            "https://github.com/${repo}/releases/latest" 2>/dev/null | sed -n 's|.*/tag/||p')"
+    fi
+    printf '%s' "$version"
+}
+
 main() {
     REPO="saborrie/grove"
     BIN="grove"
@@ -45,8 +67,7 @@ main() {
     # --- 2. version --------------------------------------------------------------
 
     if [ "$VERSION" = "latest" ]; then
-        VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-            | grep -m1 '"tag_name":' | cut -d'"' -f4)"
+        VERSION="$(latest_version "$REPO")"
         [ -n "$VERSION" ] || die "could not work out the latest version — set GROVE_VERSION"
     fi
 
