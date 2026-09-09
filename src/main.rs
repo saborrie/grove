@@ -18,7 +18,7 @@ mod tree;
 mod wrap;
 
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::event::{
@@ -62,8 +62,13 @@ struct App {
     /// move again — otherwise every scroll snaps straight back.
     follow: bool,
     herdr: Option<graphics::Herdr>,
-    thumb: Option<Thumb>,
-    /// What the graphics layer is currently showing, and where.
+    /// The loaded picture and the file it came from. The path travels WITH the
+    /// picture: the selection has already moved on by the time it is published.
+    thumb: Option<(PathBuf, Thumb)>,
+    /// The preview body the picture was built for, so a resize rebuilds it at
+    /// the new size instead of rescaling it.
+    thumb_body: Rect,
+    /// What the graphics layer is actually showing, and where.
     placed: Option<(PathBuf, Rect)>,
     trouble: Option<String>,
     quit: bool,
@@ -86,6 +91,7 @@ impl App {
             follow: true,
             herdr: graphics::Herdr::from_env(),
             thumb: None,
+            thumb_body: Rect::ZERO,
             placed: None,
             trouble: None,
             quit: false,
@@ -187,40 +193,39 @@ impl App {
         match media::thumbnail(&row.path, kind, (self.body.width, self.body.height), herdr.cell) {
             Ok(thumb) => {
                 self.doc.info = format!("{} × {}   {}", thumb.source.0, thumb.source.1, self.doc.info);
-                self.thumb = Some(thumb);
+                self.thumb = Some((row.path.clone(), thumb));
+                self.thumb_body = self.body;
             }
             Err(why) => self.trouble = Some(why),
         }
     }
 
-    /// Put the picture on the pane, or take it off. Only ever talks to herdr when
-    /// something actually changed: every set is a base64 round trip.
+    /// Put the picture on the pane, or take it off. Every set is a base64 round
+    /// trip, so this only talks to herdr when something actually changed.
     fn sync_picture(&mut self) {
         let Some(herdr) = &self.herdr else { return };
-        let wanted = self.current().filter(|_| self.doc.media.is_some()).map(|r| r.path.clone());
-        match (wanted, &self.placed) {
-            (None, Some(_)) => {
+        // A resize means the picture was built for a rectangle that no longer
+        // exists; rebuild it rather than let the compositor rescale it.
+        if self.thumb.is_some() && self.thumb_body != self.body {
+            self.stale = true;
+        }
+        let action = picture_action(
+            self.stale,
+            self.thumb.as_ref().map(|(path, thumb)| (path.as_path(), thumb.cells)),
+            self.body,
+            self.placed.as_ref().map(|(path, rect)| (path.as_path(), *rect)),
+        );
+        match action {
+            Picture::Leave => {}
+            Picture::Hide => {
                 herdr.clear();
                 self.placed = None;
             }
-            (Some(path), placed) => {
-                let moved = placed.as_ref().is_none_or(|(p, r)| *p != path || *r != self.body);
-                if let Some(thumb) = &self.thumb {
-                    if moved {
-                        herdr.set(&thumb.png, thumb.size, centre(self.body, thumb.cells));
-                        self.placed = Some((path, self.body));
-                    }
-                } else if placed.is_some() {
-                    herdr.clear();
-                    self.placed = None;
+            Picture::Show(rect) => {
+                if let Some((path, thumb)) = &self.thumb {
+                    herdr.set(&thumb.png, thumb.size, rect);
+                    self.placed = Some((path.clone(), rect));
                 }
-            }
-            (None, None) => {}
-        }
-        // A resize changes how many pixels the picture should have been built for.
-        if let Some((_, rect)) = &self.placed {
-            if *rect != self.body {
-                self.stale = true;
             }
         }
     }
@@ -379,6 +384,46 @@ impl App {
     }
 }
 
+/// What the graphics layer should do this frame.
+#[derive(Debug, PartialEq, Eq)]
+enum Picture {
+    /// Leave the pane exactly as it is.
+    Leave,
+    /// Put the loaded picture on this rectangle.
+    Show(Rect),
+    /// Take whatever is on the pane off it.
+    Hide,
+}
+
+/// Decide from the picture that was LOADED, never from the row the cursor is on.
+///
+/// Between an arrow press and the load that follows it, the two disagree: the
+/// document, its thumbnail and its caption still belong to the previous row.
+/// Publishing then would put the old picture on the pane under the new row's
+/// name — and the next frame, believing itself up to date, would never correct
+/// it. That is the "preview does not update until you move again" bug.
+fn picture_action(
+    stale: bool,
+    thumb: Option<(&Path, (u16, u16))>,
+    body: Rect,
+    placed: Option<(&Path, Rect)>,
+) -> Picture {
+    if stale {
+        return Picture::Leave;
+    }
+    match thumb {
+        None if placed.is_some() => Picture::Hide,
+        None => Picture::Leave,
+        Some((path, cells)) => {
+            let rect = centre(body, cells);
+            match placed {
+                Some((shown, at)) if shown == path && at == rect => Picture::Leave,
+                _ => Picture::Show(rect),
+            }
+        }
+    }
+}
+
 /// The row under a click, or `None` when the pointer is outside the tree body or
 /// past its last row.
 fn row_at(body: Rect, offset: usize, count: usize, column: u16, row: u16) -> Option<usize> {
@@ -483,8 +528,6 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
 mod tests {
     use super::*;
 
-    const BODY: Rect = Rect { x: 0, y: 1, width: 20, height: 5 };
-
     #[test]
     fn clicks_map_to_the_row_under_the_pointer() {
         assert_eq!(row_at(BODY, 0, 10, 3, 1), Some(0));
@@ -499,6 +542,49 @@ mod tests {
         assert_eq!(row_at(BODY, 0, 10, 3, 0), None, "on the header");
         assert_eq!(row_at(BODY, 0, 10, 3, 9), None, "below the body");
         assert_eq!(row_at(BODY, 0, 2, 3, 4), None, "past the last row");
+    }
+
+    const BODY: Rect = Rect { x: 0, y: 1, width: 20, height: 5 };
+    const PANE: Rect = Rect { x: 20, y: 1, width: 40, height: 20 };
+
+    /// The regression: arrowing from one image straight to another used to
+    /// publish the FIRST image under the second one's name, and then sit there.
+    #[test]
+    fn a_stale_preview_never_publishes_the_previous_picture() {
+        let old = Path::new("/pics/badge.png");
+        let new = Path::new("/pics/gradient.png");
+        // Cursor has moved to `new`; the loaded thumbnail is still `old`.
+        assert_eq!(
+            picture_action(true, Some((old, (13, 6))), PANE, Some((old, centre(PANE, (13, 6))))),
+            Picture::Leave,
+        );
+        // Once the load catches up, the new picture goes up on its own rectangle.
+        let action = picture_action(false, Some((new, (40, 12))), PANE, Some((old, centre(PANE, (13, 6)))));
+        assert_eq!(action, Picture::Show(centre(PANE, (40, 12))));
+    }
+
+    #[test]
+    fn an_unchanged_picture_is_not_resent() {
+        let path = Path::new("/pics/badge.png");
+        let rect = centre(PANE, (13, 6));
+        assert_eq!(picture_action(false, Some((path, (13, 6))), PANE, Some((path, rect))), Picture::Leave);
+    }
+
+    #[test]
+    fn a_moved_rectangle_republishes_the_same_picture() {
+        let path = Path::new("/pics/badge.png");
+        let stale_rect = Rect { x: 99, y: 99, width: 1, height: 1 };
+        assert_eq!(
+            picture_action(false, Some((path, (13, 6))), PANE, Some((path, stale_rect))),
+            Picture::Show(centre(PANE, (13, 6))),
+        );
+    }
+
+    #[test]
+    fn moving_onto_a_text_file_takes_the_picture_down() {
+        let path = Path::new("/pics/badge.png");
+        assert_eq!(picture_action(false, None, PANE, Some((path, centre(PANE, (13, 6))))), Picture::Hide);
+        assert_eq!(picture_action(false, None, PANE, None), Picture::Leave);
     }
 
     #[test]
