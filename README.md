@@ -45,6 +45,9 @@ grove is the small intersection: the tree shape, one fixed root, and real pictur
 - **Previews that earn the pane** — syntax-highlighted text with line numbers,
   images, video, the first page of a PDF, and a listing for directories. The
   preview follows the cursor, so walking the tree *is* browsing.
+- **It follows the disk.** Files an agent, a build or a `git checkout` writes,
+  deletes or renames appear in the tree on their own, and a file being written
+  while you read it re-renders in place. Nothing to press, nothing to configure.
 
 <img src="assets/demo-code.png" alt="grove previewing a Rust file with syntax highlighting and line numbers" width="900">
 
@@ -57,12 +60,30 @@ grove is the small intersection: the tree shape, one fixed root, and real pictur
 | `↑` `↓` | Move |
 | `→` | Expand a folder |
 | `←` | Collapse it, or step out to the parent |
-| `Enter` | Toggle a folder — or re-read the selected file from disk, which is what you want while an agent is writing to it |
+| `Enter` | Toggle a folder — or force a re-read of everything, when you would rather be sure than wait a quarter-second |
 | `Ctrl+C` | Quit |
 | Click | Select a row; on a folder, fold it |
 | Wheel | Scroll whichever half the pointer is over — the tree stays where you put it until the arrows move again |
 
 There is nothing else to learn, and nothing else to accidentally press.
+
+## Following the disk
+
+grove re-reads a directory when that directory's mtime moves, which is exactly
+when an entry has been added, removed or renamed. It checks four times a second,
+so a file something else just wrote is on screen before you have finished looking
+back at the pane. The previewed file is watched the same way, by mtime and size,
+and re-renders where you had it scrolled to rather than snapping back to the top.
+
+It is a `stat` per **visible** directory, not a filesystem watch. Folding a folder
+stops it being watched, so the cost tracks what is on screen rather than the size
+of the tree — around 0.2% of one core with forty folders open. That choice is
+deliberate: watches are the thing that quietly stops working on an NFS or SSHFS
+mount, in a container that has run out of inotify quota, and across
+`herdr --remote`, which is where grove is often standing.
+
+A write *inside* a file leaves the tree alone. The tree shows names, and
+rebuilding it because a log grew would be churn nobody can see.
 
 ## Pictures
 

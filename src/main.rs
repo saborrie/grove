@@ -19,7 +19,7 @@ mod wrap;
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
@@ -42,6 +42,51 @@ const TREE_MIN: u16 = 16;
 const TREE_MAX: u16 = 46;
 const PREVIEW_MIN: u16 = 24;
 
+/// How often grove looks at the disk. Short enough that a file an agent just
+/// wrote is there by the time you look back at the pane; long enough that the
+/// handful of stats it costs never shows up in a profile.
+const SCAN: Duration = Duration::from_millis(250);
+
+/// How a file looked when it was read: mtime and size. Cheap to take and enough
+/// to catch a rewrite — a change too fast for both to be caught here is a change
+/// the next scan sees.
+type Stamp = (SystemTime, u64);
+
+/// Which file something was made from, and which version of that file. The
+/// stamp is part of the identity on purpose: a file rewritten in place keeps
+/// its path, and a picture keyed on the path alone would sit on the pane
+/// showing what the old bytes drew.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Shot {
+    path: PathBuf,
+    stamp: Option<Stamp>,
+}
+
+impl Shot {
+    /// Take the stamp BEFORE reading the file, so a write that lands during the
+    /// read is caught by the next scan instead of being stamped as already seen.
+    fn of(path: &Path) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            stamp: stamp(path),
+        }
+    }
+
+    /// Whether the file has moved on since this shot was taken. A file that has
+    /// been deleted stamps as `None`, which differs from any `Some` — so it
+    /// counts as changed exactly once, then settles.
+    fn outdated(&self) -> bool {
+        stamp(&self.path) != self.stamp
+    }
+}
+
+/// `None` for anything that cannot be stat'ed, which is a stable answer rather
+/// than an error: a path that is gone stays gone.
+fn stamp(path: &Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
 struct App {
     tree: Tree,
     rows: Vec<Row>,
@@ -62,14 +107,17 @@ struct App {
     /// move again — otherwise every scroll snaps straight back.
     follow: bool,
     herdr: Option<graphics::Herdr>,
-    /// The loaded picture and the file it came from. The path travels WITH the
+    /// The loaded picture and the file it came from. The shot travels WITH the
     /// picture: the selection has already moved on by the time it is published.
-    thumb: Option<(PathBuf, Thumb)>,
+    thumb: Option<(Shot, Thumb)>,
     /// The preview body the picture was built for, so a resize rebuilds it at
     /// the new size instead of rescaling it.
     thumb_body: Rect,
     /// What the graphics layer is actually showing, and where.
-    placed: Option<(PathBuf, Rect)>,
+    placed: Option<(Shot, Rect)>,
+    /// The file the preview was built from, as it looked at the time. Each scan
+    /// asks whether it still looks like that, and re-reads it when it does not.
+    watched: Option<Shot>,
     trouble: Option<String>,
     quit: bool,
 }
@@ -93,6 +141,7 @@ impl App {
             thumb: None,
             thumb_body: Rect::ZERO,
             placed: None,
+            watched: None,
             trouble: None,
             quit: false,
         }
@@ -107,12 +156,30 @@ impl App {
     fn rebuild(&mut self) {
         let keep = self.current().map(|r| r.path.clone());
         self.rows = self.tree.rows();
-        if let Some(path) = keep
-            && let Some(index) = self.rows.iter().position(|r| r.path == path)
+        if let Some(path) = &keep
+            && let Some(index) = self.rows.iter().position(|r| &r.path == path)
         {
             self.selected = index;
         }
         self.selected = self.selected.min(self.rows.len().saturating_sub(1));
+        // Rows appearing or vanishing can land the cursor on a different path —
+        // most obviously when the selected file is the one that was deleted. The
+        // preview is then captioned with a row nobody is standing on.
+        if self.current().map(|r| r.path.clone()) != keep {
+            self.stale = true;
+        }
+    }
+
+    /// Follow the disk. Entries that appeared or vanished under an open folder
+    /// come into the tree, and a file written since it was previewed is read
+    /// again — which is the whole point when something else is doing the writing.
+    fn follow_disk(&mut self) {
+        if self.tree.rescan() {
+            self.rebuild();
+        }
+        if self.watched.as_ref().is_some_and(Shot::outdated) {
+            self.stale = true;
+        }
     }
 
     fn move_by(&mut self, delta: isize) {
@@ -166,8 +233,9 @@ impl App {
             self.rebuild();
             self.stale = true;
         } else {
-            // A file is already previewed by arrowing onto it; Enter re-reads it
-            // from disk, which is what makes it useful while an agent is writing.
+            // Scanning already keeps both halves current; Enter is the button for
+            // when you want to be sure, and re-reads everything without waiting
+            // for a stamp to prove it moved.
             self.tree.refresh();
             self.rebuild();
             self.stale = true;
@@ -180,9 +248,22 @@ impl App {
         self.trouble = None;
         let Some(row) = self.current().cloned() else {
             self.doc = Doc::empty();
+            self.watched = None;
             return;
         };
+        // Re-reading the file you are already reading must not throw you back to
+        // the top of it: a log being appended to would be unreadable.
+        let reread = self
+            .watched
+            .as_ref()
+            .is_some_and(|was| was.path == row.path);
+        let scroll = self.doc.scroll;
+        let shot = Shot::of(&row.path);
+        self.watched = Some(shot.clone());
         self.doc = Doc::load(&row.path, row.is_dir);
+        if reread {
+            self.doc.scroll = scroll;
+        }
         let Some(kind) = self.doc.media else { return };
         // The picture is sized in pixels, so the body has to have been drawn once.
         if self.body.width == 0 || self.body.height == 0 {
@@ -204,7 +285,7 @@ impl App {
                     "{} × {}   {}",
                     thumb.source.0, thumb.source.1, self.doc.info
                 );
-                self.thumb = Some((row.path.clone(), thumb));
+                self.thumb = Some((shot, thumb));
                 self.thumb_body = self.body;
             }
             Err(why) => self.trouble = Some(why),
@@ -222,13 +303,9 @@ impl App {
         }
         let action = picture_action(
             self.stale,
-            self.thumb
-                .as_ref()
-                .map(|(path, thumb)| (path.as_path(), thumb.cells)),
+            self.thumb.as_ref().map(|(shot, thumb)| (shot, thumb.cells)),
             self.body,
-            self.placed
-                .as_ref()
-                .map(|(path, rect)| (path.as_path(), *rect)),
+            self.placed.as_ref().map(|(shot, rect)| (shot, *rect)),
         );
         match action {
             Picture::Leave => {}
@@ -237,9 +314,9 @@ impl App {
                 self.placed = None;
             }
             Picture::Show(rect) => {
-                if let Some((path, thumb)) = &self.thumb {
+                if let Some((shot, thumb)) = &self.thumb {
                     herdr.set(&thumb.png, thumb.size, rect);
-                    self.placed = Some((path.clone(), rect));
+                    self.placed = Some((shot.clone(), rect));
                 }
             }
         }
@@ -440,11 +517,14 @@ enum Picture {
 /// Publishing then would put the old picture on the pane under the new row's
 /// name — and the next frame, believing itself up to date, would never correct
 /// it. That is the "preview does not update until you move again" bug.
+///
+/// Pictures are compared by [`Shot`] rather than by path, so a file rewritten
+/// under its own name counts as a different picture and goes back up.
 fn picture_action(
     stale: bool,
-    thumb: Option<(&Path, (u16, u16))>,
+    thumb: Option<(&Shot, (u16, u16))>,
     body: Rect,
-    placed: Option<(&Path, Rect)>,
+    placed: Option<(&Shot, Rect)>,
 ) -> Picture {
     if stale {
         return Picture::Leave;
@@ -452,10 +532,10 @@ fn picture_action(
     match thumb {
         None if placed.is_some() => Picture::Hide,
         None => Picture::Leave,
-        Some((path, cells)) => {
+        Some((shot, cells)) => {
             let rect = centre(body, cells);
             match placed {
-                Some((shown, at)) if shown == path && at == rect => Picture::Leave,
+                Some((shown, at)) if shown == shot && at == rect => Picture::Leave,
                 _ => Picture::Show(rect),
             }
         }
@@ -538,10 +618,13 @@ KEYS:
     Up/Down             Move
     Right               Expand a folder
     Left                Collapse it, or step out to the parent
-    Enter               Toggle a folder, or re-read the selected file
+    Enter               Toggle a folder, or force a re-read of everything
     Ctrl+C              Quit
 
     Click selects a row (a folder folds); the wheel scrolls whichever half it is over.
+
+The tree and the preview follow the disk on their own: files written, deleted or
+renamed by anything else appear within a quarter of a second, without a keypress.
 
 Pictures are drawn through herdr's pane graphics API, so run grove in a herdr pane.
 ";
@@ -577,6 +660,7 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()> {
+    let mut scanned = Instant::now();
     while !app.quit {
         terminal.draw(|frame| app.draw(frame))?;
         app.sync_picture();
@@ -586,9 +670,15 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
             app.load();
             continue;
         }
-        if event::poll(Duration::from_millis(200))? {
+        if event::poll(SCAN)? {
             let event = event::read()?;
             app.handle(event);
+        }
+        // Off a clock rather than off the poll timing out, so a pane being
+        // scrolled or resized keeps following the disk instead of starving.
+        if scanned.elapsed() >= SCAN {
+            app.follow_disk();
+            scanned = Instant::now();
         }
     }
     Ok(())
@@ -627,45 +717,89 @@ mod tests {
         height: 20,
     };
 
+    /// A picture's identity: which file, and which version of it.
+    fn shot(name: &str, version: u64) -> Shot {
+        Shot {
+            path: PathBuf::from(name),
+            stamp: Some((SystemTime::UNIX_EPOCH + Duration::from_secs(version), 512)),
+        }
+    }
+
     /// The regression: arrowing from one image straight to another used to
     /// publish the FIRST image under the second one's name, and then sit there.
     #[test]
     fn a_stale_preview_never_publishes_the_previous_picture() {
-        let old = Path::new("/pics/badge.png");
-        let new = Path::new("/pics/gradient.png");
+        let old = shot("/pics/badge.png", 1);
+        let new = shot("/pics/gradient.png", 1);
         // Cursor has moved to `new`; the loaded thumbnail is still `old`.
         assert_eq!(
             picture_action(
                 true,
-                Some((old, (13, 6))),
+                Some((&old, (13, 6))),
                 PANE,
-                Some((old, centre(PANE, (13, 6))))
+                Some((&old, centre(PANE, (13, 6))))
             ),
             Picture::Leave,
         );
         // Once the load catches up, the new picture goes up on its own rectangle.
         let action = picture_action(
             false,
-            Some((new, (40, 12))),
+            Some((&new, (40, 12))),
             PANE,
-            Some((old, centre(PANE, (13, 6)))),
+            Some((&old, centre(PANE, (13, 6)))),
         );
         assert_eq!(action, Picture::Show(centre(PANE, (40, 12))));
     }
 
     #[test]
     fn an_unchanged_picture_is_not_resent() {
-        let path = Path::new("/pics/badge.png");
+        let pic = shot("/pics/badge.png", 1);
         let rect = centre(PANE, (13, 6));
         assert_eq!(
-            picture_action(false, Some((path, (13, 6))), PANE, Some((path, rect))),
+            picture_action(false, Some((&pic, (13, 6))), PANE, Some((&pic, rect))),
             Picture::Leave
         );
     }
 
+    /// The refresh case: something overwrites the image you are looking at. Same
+    /// path, same rectangle — keyed on the path alone the pane would go on
+    /// showing what the old bytes drew, and nothing would ever correct it.
+    #[test]
+    fn a_file_rewritten_in_place_puts_its_new_picture_up() {
+        let was = shot("/pics/badge.png", 1);
+        let now = shot("/pics/badge.png", 2);
+        let rect = centre(PANE, (13, 6));
+        assert_eq!(
+            picture_action(false, Some((&now, (13, 6))), PANE, Some((&was, rect))),
+            Picture::Show(rect),
+        );
+        // And once it is up it stays up, rather than being re-sent every frame.
+        assert_eq!(
+            picture_action(false, Some((&now, (13, 6))), PANE, Some((&now, rect))),
+            Picture::Leave,
+        );
+    }
+
+    #[test]
+    fn a_shot_goes_out_of_date_when_the_file_is_written_or_deleted() {
+        let path = std::env::temp_dir().join(format!("grove-shot-{}", std::process::id()));
+        std::fs::write(&path, b"one").unwrap();
+        let shot = Shot::of(&path);
+        assert!(!shot.outdated(), "an untouched file is current");
+
+        std::fs::write(&path, b"two, and rather longer").unwrap();
+        assert!(shot.outdated(), "a rewritten file is not");
+
+        std::fs::remove_file(&path).unwrap();
+        assert!(shot.outdated(), "nor is one that has been deleted");
+        // A path that is gone stays gone, so the preview re-reads once and settles
+        // instead of reloading an empty document four times a second.
+        assert!(!Shot::of(&path).outdated());
+    }
+
     #[test]
     fn a_moved_rectangle_republishes_the_same_picture() {
-        let path = Path::new("/pics/badge.png");
+        let pic = shot("/pics/badge.png", 1);
         let stale_rect = Rect {
             x: 99,
             y: 99,
@@ -673,16 +807,16 @@ mod tests {
             height: 1,
         };
         assert_eq!(
-            picture_action(false, Some((path, (13, 6))), PANE, Some((path, stale_rect))),
+            picture_action(false, Some((&pic, (13, 6))), PANE, Some((&pic, stale_rect))),
             Picture::Show(centre(PANE, (13, 6))),
         );
     }
 
     #[test]
     fn moving_onto_a_text_file_takes_the_picture_down() {
-        let path = Path::new("/pics/badge.png");
+        let pic = shot("/pics/badge.png", 1);
         assert_eq!(
-            picture_action(false, None, PANE, Some((path, centre(PANE, (13, 6))))),
+            picture_action(false, None, PANE, Some((&pic, centre(PANE, (13, 6))))),
             Picture::Hide
         );
         assert_eq!(picture_action(false, None, PANE, None), Picture::Leave);

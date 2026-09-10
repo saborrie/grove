@@ -1,13 +1,14 @@
-//! Taken from herdr-sidebar and kept whole — expansion persistence and Collapse All came with it and
-//! is unused here, but keeping the file intact makes upstream fixes easy to merge.
+//! Taken from herdr-sidebar — expansion persistence and Collapse All came with it and are unused
+//! here, but keeping those parts makes upstream fixes easy to merge. `rescan` is grove's own.
 #![allow(dead_code)]
 //! Filesystem tree model: which directories are expanded, and the flat list of
-//! visible rows the UI renders. Directory listings are cached and re-read only on
-//! explicit refresh, so redraws never touch the disk.
+//! visible rows the UI renders. Listings are cached so redraws never touch the
+//! disk, and `rescan` drops the ones the disk has moved on from.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -25,10 +26,20 @@ pub struct Row {
     pub expanded: bool,
 }
 
+/// A cached directory listing, and the directory's mtime as it stood when the
+/// listing was read.
+struct Listing {
+    /// Stamped BEFORE the read, deliberately: a change that lands mid-read then
+    /// leaves the stamp looking older than the directory and is caught on the
+    /// next scan, where a stamp taken afterwards would swallow it.
+    stamp: Option<SystemTime>,
+    entries: Vec<Entry>,
+}
+
 pub struct Tree {
     root: PathBuf,
     expanded: BTreeSet<PathBuf>,
-    cache: HashMap<PathBuf, Vec<Entry>>,
+    cache: HashMap<PathBuf, Listing>,
     pub show_hidden: bool,
 }
 
@@ -59,6 +70,35 @@ impl Tree {
     /// Drop all cached listings; the next `rows()` re-reads the disk.
     pub fn refresh(&mut self) {
         self.cache.clear();
+    }
+
+    /// Drop the listing of every visible directory the disk has moved on from,
+    /// so the next `rows()` re-reads just those. Reports whether anything was
+    /// dropped, so a caller with nothing to do can do nothing.
+    ///
+    /// A directory's mtime moves when an entry is added, removed or renamed —
+    /// exactly the set of changes the tree can show. A write *inside* a file
+    /// leaves it alone, and rightly so: the tree shows names, not contents.
+    ///
+    /// This is a stat per visible directory, not a filesystem watch. It costs
+    /// the same on an NFS mount, in a container with no inotify quota left, and
+    /// on the far side of `herdr --remote`, which a watch does not.
+    pub fn rescan(&mut self) -> bool {
+        let moved: Vec<PathBuf> = self
+            .cache
+            .iter()
+            .filter(|(dir, listing)| dir_stamp(dir) != listing.stamp)
+            .map(|(dir, _)| dir.clone())
+            .collect();
+        for dir in &moved {
+            self.cache.remove(dir);
+        }
+        !moved.is_empty()
+    }
+
+    /// How many directories `rescan` has to stat — the visible ones.
+    pub fn watched_dirs(&self) -> usize {
+        self.cache.len()
     }
 
     pub fn is_expanded(&self, path: &Path) -> bool {
@@ -102,8 +142,9 @@ impl Tree {
 
     fn children(&mut self, dir: &Path) -> Vec<Entry> {
         if let Some(cached) = self.cache.get(dir) {
-            return cached.clone();
+            return cached.entries.clone();
         }
+        let stamp = dir_stamp(dir);
         let mut entries: Vec<Entry> = fs::read_dir(dir)
             .map(|rd| {
                 rd.filter_map(|e| e.ok())
@@ -115,19 +156,37 @@ impl Tree {
             })
             .unwrap_or_default();
         sort_entries(&mut entries);
-        self.cache.insert(dir.to_path_buf(), entries.clone());
+        self.cache.insert(
+            dir.to_path_buf(),
+            Listing {
+                stamp,
+                entries: entries.clone(),
+            },
+        );
         entries
     }
 
     /// The visible rows, depth-first through expanded directories.
     pub fn rows(&mut self) -> Vec<Row> {
         let mut out = Vec::new();
+        let mut walked = HashSet::new();
         let root = self.root.clone();
-        self.walk(&root, 0, &mut out);
+        self.walk(&root, 0, &mut out, &mut walked);
+        // Forget every directory that is no longer on screen. A folded folder's
+        // listing is one nobody will read again, and keeping it would have
+        // `rescan` stat directories the tree stopped showing hours ago.
+        self.cache.retain(|dir, _| walked.contains(dir));
         out
     }
 
-    fn walk(&mut self, dir: &Path, depth: usize, out: &mut Vec<Row>) {
+    fn walk(
+        &mut self,
+        dir: &Path,
+        depth: usize,
+        out: &mut Vec<Row>,
+        walked: &mut HashSet<PathBuf>,
+    ) {
+        walked.insert(dir.to_path_buf());
         let show_hidden = self.show_hidden;
         for entry in self.children(dir) {
             if !visible(&entry.name, show_hidden) {
@@ -143,10 +202,17 @@ impl Tree {
                 path: path.clone(),
             });
             if expanded {
-                self.walk(&path, depth + 1, out);
+                self.walk(&path, depth + 1, out, walked);
             }
         }
     }
+}
+
+/// A directory's mtime, or `None` when it cannot be read — which is itself a
+/// stable answer, so a directory that has been deleted stops looking changed
+/// once its parent has dropped it.
+fn dir_stamp(dir: &Path) -> Option<SystemTime> {
+    fs::metadata(dir).ok()?.modified().ok()
 }
 
 /// VS Code Explorer order: directories first, then files, each case-insensitive.
@@ -184,12 +250,33 @@ mod tests {
         fn touch(&self, rel: &str) {
             fs::write(self.0.join(rel), b"").unwrap();
         }
+        fn rm(&self, rel: &str) {
+            let path = self.0.join(rel);
+            if path.is_dir() {
+                fs::remove_dir_all(path).unwrap();
+            } else {
+                fs::remove_file(path).unwrap();
+            }
+        }
     }
 
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// Rescan until the directory mtime has caught up with the change we just
+    /// made. Filesystems with sub-second timestamps answer on the first call;
+    /// a coarse one costs a tick here instead of a flake in CI.
+    fn settled_rescan(tree: &mut Tree) -> bool {
+        for _ in 0..40 {
+            if tree.rescan() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
     }
 
     fn names(rows: &[Row]) -> Vec<(String, usize)> {
@@ -299,6 +386,99 @@ mod tests {
     fn unreadable_or_missing_dir_is_empty() {
         let mut tree = Tree::new(std::env::temp_dir().join("aa-filetree-does-not-exist"));
         assert!(tree.rows().is_empty());
+    }
+
+    #[test]
+    fn rescan_picks_up_a_file_written_behind_the_tree() {
+        let tmp = TempDir::new("rescan-new");
+        tmp.touch("one.txt");
+        let mut tree = Tree::new(tmp.0.clone());
+        assert_eq!(tree.rows().len(), 1);
+
+        // The whole point: nobody pressed a key, an agent just wrote a file.
+        tmp.touch("two.txt");
+        assert!(settled_rescan(&mut tree));
+        assert_eq!(
+            names(&tree.rows()),
+            vec![("one.txt".into(), 0), ("two.txt".into(), 0)]
+        );
+    }
+
+    #[test]
+    fn rescan_reaches_inside_expanded_directories() {
+        let tmp = TempDir::new("rescan-deep");
+        tmp.mkdir("src");
+        tmp.touch("src/main.rs");
+        let mut tree = Tree::new(tmp.0.clone());
+        tree.expand(&tmp.0.join("src"));
+        assert_eq!(tree.rows().len(), 2);
+
+        tmp.touch("src/lib.rs");
+        assert!(settled_rescan(&mut tree));
+        assert!(
+            tree.rows()
+                .iter()
+                .any(|r| r.name == "lib.rs" && r.depth == 1)
+        );
+    }
+
+    #[test]
+    fn a_still_tree_reports_no_change_and_stays_cached() {
+        let tmp = TempDir::new("rescan-still");
+        tmp.mkdir("src");
+        tmp.touch("src/main.rs");
+        let mut tree = Tree::new(tmp.0.clone());
+        tree.expand(&tmp.0.join("src"));
+        let before = tree.rows();
+        assert!(!tree.rescan(), "nothing moved, so nothing to re-read");
+        assert_eq!(tree.rows(), before);
+    }
+
+    #[test]
+    fn writing_into_a_file_leaves_the_tree_alone() {
+        let tmp = TempDir::new("rescan-write");
+        tmp.touch("one.txt");
+        let mut tree = Tree::new(tmp.0.clone());
+        tree.rows();
+
+        // The tree shows names. A file growing is the preview's business, and
+        // rebuilding the rows for it would be churn nobody can see.
+        fs::write(tmp.0.join("one.txt"), b"now with contents").unwrap();
+        assert!(!tree.rescan());
+    }
+
+    #[test]
+    fn a_deleted_entry_leaves_the_tree() {
+        let tmp = TempDir::new("rescan-gone");
+        tmp.mkdir("doomed");
+        tmp.touch("doomed/child.txt");
+        tmp.touch("kept.txt");
+        let mut tree = Tree::new(tmp.0.clone());
+        tree.expand(&tmp.0.join("doomed"));
+        assert_eq!(tree.rows().len(), 3);
+
+        tmp.rm("doomed");
+        assert!(settled_rescan(&mut tree));
+        assert_eq!(names(&tree.rows()), vec![("kept.txt".into(), 0)]);
+        // And the vanished directory stops costing a stat every tick.
+        assert_eq!(tree.watched_dirs(), 1, "only the root is left to watch");
+        assert!(!tree.rescan(), "a deleted directory must not keep flapping");
+    }
+
+    #[test]
+    fn folding_a_directory_stops_it_being_watched() {
+        let tmp = TempDir::new("rescan-fold");
+        tmp.mkdir("a/inner");
+        tmp.mkdir("b");
+        let mut tree = Tree::new(tmp.0.clone());
+        tree.expand(&tmp.0.join("a"));
+        tree.expand(&tmp.0.join("a/inner"));
+        tree.rows();
+        assert_eq!(tree.watched_dirs(), 3, "root, a, a/inner");
+
+        tree.collapse(&tmp.0.join("a"));
+        tree.rows();
+        assert_eq!(tree.watched_dirs(), 1, "only the root is still on screen");
     }
 
     #[test]
