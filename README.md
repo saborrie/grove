@@ -204,17 +204,51 @@ composites them as kitty graphics outside the text grid. A recording would show
 a perfect tree beside an empty rectangle. The only way to photograph a picture is
 to render one.
 
+## Committing
+
+Commit subjects are [Conventional Commits](https://www.conventionalcommits.org),
+because the release process reads them:
+
+```
+feat: follow the disk instead of waiting to be told
+fix(preview): stop a rewritten image keeping its old picture
+docs: explain why previews need herdr
+```
+
+| Subject | Release |
+| --- | --- |
+| `feat:` | minor — 0.1.0 → 0.2.0 |
+| `fix:` | patch — 0.1.0 → 0.1.1 |
+| `feat!:`, or a `BREAKING CHANGE:` footer | major — 0.1.0 → 1.0.0 |
+| `docs:` `ci:` `style:` `refactor:` `chore:` `test:` | none |
+
+The `!` wins whatever the type says, so `refactor(api)!:` is a major. A scope is
+optional. Anything that is not a Conventional Commit releases nothing, which is
+the safe direction to fail in.
+
 ## Releasing
 
-Cargo.toml holds the version; a tag says which commit is that version. Pushing a
-tag that matches is the whole release process — CI checks the two agree, builds
-both Linux targets, and publishes the release only if every binary built.
+There is no release process. Land a `feat:` or `fix:` on main, and once the tests
+pass, CI works out the next version from every commit since the last tag, pushes
+that tag, builds both Linux targets and publishes the release — only if every
+binary built. Nobody picks a version number by hand.
+
+**Nothing in the repository records a version.** `Cargo.toml` has no `version`
+field: grove is not on crates.io, so the git tag is the only thing that says
+which release a build is, and a second number in a manifest would only be
+something to keep in step. `grove --version` reports `GROVE_VERSION`, which the
+release workflow injects from the tag. A build from a checkout has no tag behind
+it and honestly says `dev`.
+
+The version calculator is `src/bin/next_version.rs`, behind the `ci` feature so
+that `cargo install --git` builds grove and only grove. Its rules are unit-tested
+— run them with `cargo test --all-features`.
+
+If a release ever needs redoing, pushing a tag by hand still runs the same
+publish:
 
 ```sh
-# 1. bump `version` in Cargo.toml, commit it
-# 2. tag that commit with the same number, no `v` prefix
-git tag 0.2.0
-git push origin 0.2.0
+git tag 0.2.1 && git push origin 0.2.1
 ```
 
 `ci.yml` runs `cargo fmt --check`, `cargo clippy -D warnings` and the tests on

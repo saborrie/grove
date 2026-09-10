@@ -6,10 +6,12 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel a superseded run rather than paying for both.
+# Cancel a superseded run rather than paying for both — but never on main,
+# where a run may be part-way through cutting a tag and publishing a release.
+# Cancelling that leaves a tag with no release behind it.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,13 +32,73 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      # --all-features so the release version calculator is linted and tested
+      # too; it is behind the `ci` feature and would otherwise never be built.
       - name: Lint
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --all-targets
+        run: cargo test --all-targets --all-features
 
       # The release build is what ships, and it is the one that can fail on
       # its own (dead code behind cfg, overflow checks off). Cheap insurance.
       - name: Build
         run: cargo build --release
+
+  # Auto-release, the way clarity does it: only after the tests pass, and only
+  # for a push to main, so a red build can never produce a tag. When a
+  # release-worthy commit (feat/fix/breaking, per Conventional Commits) lands
+  # green, the next version is derived from every commit since the last tag and
+  # that tag is pushed. Nobody picks a version number by hand.
+  #
+  # A tag pushed with the default GITHUB_TOKEN does not start another workflow
+  # run, so the publish cannot be a tag-triggered workflow of its own — this
+  # calls release.yml directly instead of pushing a tag and hoping.
+  tag:
+    name: Tag release
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # every commit and tag, or the version cannot be derived
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Work out the next version
+        id: next
+        run: echo "version=$(cargo run -q --features ci --bin next-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Tag it
+        if: steps.next.outputs.version != ''
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Nothing to release
+        if: steps.next.outputs.version == ''
+        run: echo "No feat/fix/breaking commits since the last tag — nothing to release."
+
+  release:
+    name: Release
+    needs: [tag]
+    if: needs.tag.outputs.version != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.tag.outputs.version }}

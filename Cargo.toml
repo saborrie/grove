@@ -1,6 +1,9 @@
 [package]
 name = "grove"
-version = "0.1.0"
+# No `version`: grove is not published to crates.io, and the git tag is the only
+# thing that says which release a build is. Cargo defaults this to 0.0.0, and
+# `--version` reports GROVE_VERSION, injected from the tag at release time — so
+# there is no second number to keep in step with the first.
 edition = "2024"
 description = "A file tree pinned to one root, with live previews, in a single herdr pane"
 authors = ["Steven Borrie"]
@@ -15,6 +18,18 @@ license = "MIT"
 [[bin]]
 name = "grove"
 path = "src/main.rs"
+
+# The release workflow's version calculator. Behind a feature so that
+# `cargo install --git` builds grove and only grove: a target whose
+# required-features are absent is skipped, not built and installed.
+[[bin]]
+name = "next-version"
+path = "src/bin/next_version.rs"
+required-features = ["ci"]
+
+[features]
+# CI-only tooling, never enabled for a normal build.
+ci = []
 
 [dependencies]
 ratatui = "0.30"

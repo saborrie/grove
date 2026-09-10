@@ -37,6 +37,15 @@ use crate::icons::IconTheme;
 use crate::media::Thumb;
 use crate::tree::{Row, Tree};
 
+/// The release this binary was built from. The tag is the only source of truth
+/// for a version — nothing in Cargo.toml carries one — so the release workflow
+/// injects it here. A build from a checkout has no tag behind it and says so
+/// rather than claiming to be some release it resembles.
+const VERSION: &str = match option_env!("GROVE_VERSION") {
+    Some(tag) => tag,
+    None => "dev",
+};
+
 /// The tree takes a third of the pane, clamped to something usable at either end.
 const TREE_MIN: u16 = 16;
 const TREE_MAX: u16 = 46;
@@ -633,7 +642,7 @@ fn main() -> io::Result<()> {
     let first = std::env::args().nth(1);
     match first.as_deref() {
         Some("-V" | "--version") => {
-            println!("grove {}", env!("CARGO_PKG_VERSION"));
+            println!("grove {VERSION}");
             return Ok(());
         }
         Some("-h" | "--help") => {
