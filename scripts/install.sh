@@ -71,6 +71,14 @@ main() {
         [ -n "$VERSION" ] || die "could not work out the latest version — set GROVE_VERSION"
     fi
 
+    # `grove update` needs to know what the newest release is before it decides
+    # whether to fetch it. Answer and stop, so there is one implementation of
+    # "which version is current" rather than a second one inside the binary.
+    if [ -n "${GROVE_CHECK:-}" ]; then
+        printf '%s\n' "$VERSION"
+        return 0
+    fi
+
     asset="${BIN}-${VERSION}-${target}.tar.gz"
     url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
 

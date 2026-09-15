@@ -205,6 +205,27 @@ grove is not on crates.io — the name is held by an unrelated, long-abandoned
 crate, and `cargo install` needs a toolchain anyway, which is what the install
 script exists to avoid.
 
+### Updating
+
+```sh
+grove update           # replace this binary with the newest release
+grove update --check   # just say what is installed and what is released
+```
+
+It updates **the binary that is running** — found through `/proc/self/exe`, not
+guessed — so a grove in `/usr/local/bin` updates the one in `/usr/local/bin`. If
+that directory is not writable it says so before downloading anything, rather
+than half way through.
+
+The installer is baked into the binary rather than fetched, so `grove update` is
+the same download-verify-replace as the install script and never pulls code off
+the network to run it. A build from a checkout reports no version and is refused:
+replacing it with a release would throw away whatever you were working on.
+
+Re-running the install script does the same job and is safe to run over a grove
+that is open — the binary is replaced by rename, so a running grove keeps the
+copy it started from and carries on until you restart it.
+
 ### Running it
 
 ```sh

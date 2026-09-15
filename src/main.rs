@@ -16,6 +16,7 @@ mod media;
 mod syntax;
 mod theme;
 mod tree;
+mod update;
 mod wrap;
 
 use std::io;
@@ -777,7 +778,9 @@ const HELP: &str = "\
 grove — a file tree pinned to one root, with live previews, in one herdr pane
 
 USAGE:
-    grove [PATH]        Open the tree rooted at PATH (default: the current directory)
+    grove [PATH]           Open the tree rooted at PATH (default: the current directory)
+    grove update           Replace this binary with the newest release
+    grove update --check   Say what is installed and what is released, and stop
 
 OPTIONS:
     -h, --help          Print this help
@@ -808,6 +811,16 @@ fn main() -> io::Result<()> {
         }
         Some("-h" | "--help") => {
             print!("{HELP}");
+            return Ok(());
+        }
+        // Before the path arm below, which would otherwise root the tree at a
+        // directory called "update". `grove ./update` still opens that.
+        Some("update") => {
+            let check = matches!(std::env::args().nth(2).as_deref(), Some("--check"));
+            if let Err(why) = update::run(check) {
+                eprintln!("grove: {why}");
+                std::process::exit(1);
+            }
             return Ok(());
         }
         _ => {}
