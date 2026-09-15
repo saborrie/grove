@@ -99,8 +99,24 @@ main() {
     # --- 4. install --------------------------------------------------------------
 
     mkdir -p "$INSTALL_DIR"
-    install -m 755 "${tmp}/${BIN}-${VERSION}-${target}/${BIN}" "${INSTALL_DIR}/${BIN}" 2>/dev/null \
-        || { cp "${tmp}/${BIN}-${VERSION}-${target}/${BIN}" "${INSTALL_DIR}/${BIN}" && chmod 755 "${INSTALL_DIR}/${BIN}"; }
+
+    # Replace the binary without writing through it. `install` unlinks the
+    # destination first, so a grove that is already running keeps the inode it
+    # was started from and carries on; a plain `cp` would instead try to write
+    # in place and fail with ETXTBSY exactly when grove is open, which is the
+    # most likely moment for someone to be re-running this. Where `install` is
+    # missing, do the same thing by hand: write alongside, then rename over,
+    # which is atomic within a directory.
+    src="${tmp}/${BIN}-${VERSION}-${target}/${BIN}"
+    install -m 755 "$src" "${INSTALL_DIR}/${BIN}" 2>/dev/null || {
+        staged="${INSTALL_DIR}/.${BIN}.new.$$"
+        # shellcheck disable=SC2064
+        trap "rm -rf '$tmp' '$staged'" EXIT INT TERM
+        cp "$src" "$staged" \
+            && chmod 755 "$staged" \
+            && mv -f "$staged" "${INSTALL_DIR}/${BIN}" \
+            || die "could not install to ${INSTALL_DIR}/${BIN}"
+    }
 
     say "==> installed $("${INSTALL_DIR}/${BIN}" --version) to ${INSTALL_DIR}/${BIN}"
 
