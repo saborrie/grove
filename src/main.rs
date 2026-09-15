@@ -8,6 +8,7 @@
 //! Keys are the whole surface: arrows and Enter. The mouse wheel scrolls
 //! whichever half it is over. Ctrl+C quits.
 
+mod clipboard;
 mod doc;
 mod graphics;
 mod icons;
@@ -23,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
+    MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use ratatui::Frame;
@@ -56,6 +57,11 @@ const PREVIEW_MIN: u16 = 24;
 /// handful of stats it costs never shows up in a profile.
 const SCAN: Duration = Duration::from_millis(250);
 
+/// How long the "copied" note stays in the preview header. An OSC 52 write is
+/// completely invisible otherwise — the clipboard changes somewhere off-screen
+/// and nothing on the pane says it worked.
+const COPIED_FOR: Duration = Duration::from_secs(3);
+
 /// How a file looked when it was read: mtime and size. Cheap to take and enough
 /// to catch a rewrite — a change too fast for both to be caught here is a change
 /// the next scan sees.
@@ -86,6 +92,29 @@ impl Shot {
     /// counts as changed exactly once, then settles.
     fn outdated(&self) -> bool {
         stamp(&self.path) != self.stamp
+    }
+}
+
+/// A drag over the preview, in rendered-row indices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Selection {
+    anchor: usize,
+    head: usize,
+    /// Whether the pointer has actually moved since the button went down. A
+    /// plain click must not overwrite the clipboard — people click to dismiss,
+    /// to focus, or by accident.
+    dragged: bool,
+}
+
+impl Selection {
+    /// The rows it covers, lowest first, however it was dragged.
+    fn span(&self) -> (usize, usize) {
+        (self.anchor.min(self.head), self.anchor.max(self.head))
+    }
+
+    fn covers(&self, row: usize) -> bool {
+        let (from, to) = self.span();
+        self.dragged && (from..=to).contains(&row)
     }
 }
 
@@ -127,6 +156,12 @@ struct App {
     /// The file the preview was built from, as it looked at the time. Each scan
     /// asks whether it still looks like that, and re-reads it when it does not.
     watched: Option<Shot>,
+    /// A selection in the preview, as RENDERED row indices: where the button
+    /// went down, where the pointer is now, and whether it has moved at all.
+    /// It outlives the drag so that what was copied stays visible.
+    selection: Option<Selection>,
+    /// What the last copy said, and when, for the header note.
+    copied: Option<(String, Instant)>,
     trouble: Option<String>,
     quit: bool,
 }
@@ -151,6 +186,8 @@ impl App {
             thumb_body: Rect::ZERO,
             placed: None,
             watched: None,
+            selection: None,
+            copied: None,
             trouble: None,
             quit: false,
         }
@@ -255,6 +292,10 @@ impl App {
         self.stale = false;
         self.thumb = None;
         self.trouble = None;
+        // Row indices belong to the document that produced them; a reload or a
+        // move re-lays the rows out, and keeping the old span would highlight
+        // and copy whatever now happens to sit there.
+        self.selection = None;
         let Some(row) = self.current().cloned() else {
             self.doc = Doc::empty();
             self.watched = None;
@@ -405,11 +446,20 @@ impl App {
                 .fg(theme::chrome())
                 .add_modifier(Modifier::BOLD),
         )];
-        if !self.doc.info.is_empty() {
-            header.push(Span::styled(
+        match &self.copied {
+            // A clipboard write leaves no trace on screen, so say so here —
+            // briefly, then get out of the way of the file's own details.
+            Some((note, at)) if at.elapsed() < COPIED_FOR => header.push(Span::styled(
+                format!("   {note}"),
+                Style::default()
+                    .fg(theme::chrome())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            _ if !self.doc.info.is_empty() => header.push(Span::styled(
                 format!("   {}", self.doc.info),
                 Style::default().fg(theme::dim()),
-            ));
+            )),
+            _ => {}
         }
         frame.render_widget(
             Paragraph::new(Line::from(header)),
@@ -438,12 +488,20 @@ impl App {
             return;
         }
         let scroll = self.doc.scroll;
+        let selection = self.selection;
         let rows = self.doc.rows(body.width);
         let visible: Vec<Line> = rows
             .iter()
+            .enumerate()
             .skip(scroll)
             .take(usize::from(body.height))
-            .cloned()
+            .map(|(index, line)| {
+                let mut line = line.clone();
+                if selection.is_some_and(|s| s.covers(index)) {
+                    line.style = Style::default().bg(theme::selection_bg());
+                }
+                line
+            })
             .collect();
         frame.render_widget(Paragraph::new(visible), body);
     }
@@ -466,6 +524,126 @@ impl App {
         }
     }
 
+    /// The rendered row under the pointer, or `None` when it is not over the
+    /// preview body or is past the last row.
+    fn preview_row_at(&self, column: u16, row: u16) -> Option<usize> {
+        let body = self.body;
+        let inside = column >= body.x
+            && column < body.x.saturating_add(body.width)
+            && row >= body.y
+            && row < body.y.saturating_add(body.height);
+        if !inside || self.doc.media.is_some() {
+            return None;
+        }
+        let index = self.doc.scroll + usize::from(row - body.y);
+        (index < self.doc.row_count()).then_some(index)
+    }
+
+    /// Drag over the preview to select whole lines, and let go to copy them —
+    /// the same gesture as a terminal's copy-on-select, which is the point.
+    /// grove has to do it itself: it holds the mouse, so herdr never sees the
+    /// drag, and only grove knows which source lines the rows came from.
+    fn mouse(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.copied = None;
+                match self.preview_row_at(mouse.column, mouse.row) {
+                    Some(row) => {
+                        self.selection = Some(Selection {
+                            anchor: row,
+                            head: row,
+                            dragged: false,
+                        });
+                    }
+                    None => {
+                        self.selection = None;
+                        self.click(mouse.column, mouse.row);
+                    }
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.selection.is_some() => {
+                // Clamp rather than ignore: dragging off the bottom of the pane
+                // should take the rest of what is on screen, which is what the
+                // gesture looks like it is doing.
+                let last = self.doc.row_count().saturating_sub(1);
+                let head = self
+                    .preview_row_at(mouse.column, mouse.row)
+                    .unwrap_or(if mouse.row <= self.body.y {
+                        self.doc.scroll
+                    } else {
+                        last
+                    })
+                    .min(last);
+                if let Some(selection) = &mut self.selection {
+                    selection.dragged = true;
+                    selection.head = head;
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => self.copy_selection(),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let delta = if matches!(mouse.kind, MouseEventKind::ScrollUp) {
+                    -3
+                } else {
+                    3
+                };
+                if mouse.column >= self.body.x {
+                    self.doc.scroll_by(delta);
+                } else {
+                    // The tree scrolls under the cursor; the selection stays put.
+                    self.offset = self.offset.saturating_add_signed(delta);
+                    self.follow = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Put the selected lines on the clipboard, with the file and the lines
+    /// they came from above them.
+    fn copy_selection(&mut self) {
+        let Some(selection) = self.selection else {
+            return;
+        };
+        if !selection.dragged {
+            return;
+        }
+        let (from, to) = selection.span();
+        let Some(row) = self.current().cloned() else {
+            return;
+        };
+        let Some(snippet) = self.doc.snippet(from, to) else {
+            return;
+        };
+        let language = row
+            .path
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let block = clipboard::block(
+            &row.path.display().to_string(),
+            snippet.lines,
+            &language,
+            &snippet.text,
+        );
+        // The note names the file the short way; the clipboard carries the long
+        // one. Nobody reading a pane header needs the whole path.
+        let shown = row
+            .path
+            .strip_prefix(self.tree.root_path())
+            .unwrap_or(&row.path)
+            .display()
+            .to_string();
+        let note = match clipboard::copy(&block) {
+            Ok(()) => match snippet.lines {
+                Some((first, last)) if first == last => format!("copied {shown}:{first}"),
+                Some((first, last)) => format!("copied {shown}:{first}-{last}"),
+                None => format!("copied {shown}"),
+            },
+            Err(why) => why,
+        };
+        self.copied = Some((note, Instant::now()));
+    }
+
     fn handle(&mut self, event: Event) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -484,25 +662,7 @@ impl App {
                     _ => {}
                 }
             }
-            Event::Mouse(mouse)
-                if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) =>
-            {
-                self.click(mouse.column, mouse.row);
-            }
-            Event::Mouse(mouse) => {
-                let delta = match mouse.kind {
-                    MouseEventKind::ScrollUp => -3,
-                    MouseEventKind::ScrollDown => 3,
-                    _ => return,
-                };
-                if mouse.column >= self.body.x {
-                    self.doc.scroll_by(delta);
-                } else {
-                    // The tree scrolls under the cursor; the selection stays put.
-                    self.offset = self.offset.saturating_add_signed(delta);
-                    self.follow = false;
-                }
-            }
+            Event::Mouse(mouse) => self.mouse(mouse),
             _ => {}
         }
     }
@@ -631,6 +791,7 @@ KEYS:
     Ctrl+C              Quit
 
     Click selects a row (a folder folds); the wheel scrolls whichever half it is over.
+    Drag down the preview to copy those lines, with the file and line numbers attached.
 
 The tree and the preview follow the disk on their own: files written, deleted or
 renamed by anything else appear within a quarter of a second, without a keypress.

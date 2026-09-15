@@ -63,9 +63,56 @@ grove is the small intersection: the tree shape, one fixed root, and real pictur
 | `Enter` | Toggle a folder — or force a re-read of everything, when you would rather be sure than wait a quarter-second |
 | `Ctrl+C` | Quit |
 | Click | Select a row; on a folder, fold it |
+| Drag in the preview | Select whole lines and copy them, with the file and line numbers attached |
 | Wheel | Scroll whichever half the pointer is over — the tree stays where you put it until the arrows move again |
 
 There is nothing else to learn, and nothing else to accidentally press.
+
+## Copying snippets
+
+Drag down the preview and let go. The lines you dragged over land on your
+clipboard with the file and the line numbers already attached:
+
+````
+/home/you/work/src/tree.rs:142-158
+```rs
+    pub fn rescan(&mut self) -> bool {
+        ...
+    }
+```
+````
+
+That is the shape a chat wants, so pasting it into Claude carries the context
+with it — `path:line` is the form Claude Code prints and treats as clickable, and
+the fence keeps the code as code. The fence grows longer if the snippet contains
+backticks of its own, so copying out of a markdown file does not arrive in pieces.
+
+Some deliberate choices:
+
+- **Whole lines only.** Half of a wrapped line is not something you can paste and
+  act on, and a reference has to name a line to be worth anything. Dragging
+  across the middle of a wrapped line takes the whole line.
+- **What you paste is the file, not the picture of it.** No line-number gutter,
+  no wrapping, no highlighting — the original bytes of those lines.
+- **The path is absolute.** grove's root is often not the directory the agent you
+  are pasting into was started in, and a relative path resolved against the wrong
+  root is worse than a long one: it names a file that either does not exist or,
+  worse, is a different file of the same name.
+- **A plain click copies nothing.** People click to dismiss, to focus, or by
+  accident, and none of those should replace what is on your clipboard.
+
+The clipboard is written with OSC 52, so herdr forwards it to the outer terminal
+the same way it forwards the pictures. No `xclip`, no `wl-copy`, no `DISPLAY`, and
+it works unchanged over `herdr --remote` — where a clipboard helper would be
+setting the clipboard on the wrong machine. herdr recognises the sequence and
+raises its own "copied to clipboard" toast, the same one it shows for its own
+copy-on-select; grove's header adds the part that toast cannot know, naming the
+file and the lines, for a few seconds afterwards.
+
+Note that grove holds the mouse for its own click and drag, so herdr's
+copy-on-select does not fire inside grove's pane — this *is* that gesture, and it
+is the reason grove can attach the line numbers at all. herdr never sees the drag,
+and only grove knows which source lines those rows came from.
 
 ## Following the disk
 
