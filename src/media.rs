@@ -22,12 +22,32 @@ pub fn classify(path: &Path) -> Kind {
     match ext.as_str() {
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif" | "ico" | "avif"
         | "heic" | "heif" | "jxl" | "ppm" | "pgm" => Kind::Image,
-        "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v" | "wmv" | "flv" | "mpg" | "mpeg" | "ts"
-        | "ogv" => Kind::Video,
+        "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v" | "wmv" | "flv" | "mpg" | "mpeg" | "ogv"
+        | "m2ts" | "mts" => Kind::Video,
+        // ".ts" is almost always TypeScript; only a real MPEG transport
+        // stream — 188-byte packets, each opening with the 0x47 sync byte —
+        // gets treated as video.
+        "ts" if is_transport_stream(path) => Kind::Video,
         "pdf" => Kind::Pdf,
         "mp3" | "flac" | "wav" | "ogg" | "m4a" | "aac" | "opus" | "wma" => Kind::Audio,
         _ => Kind::Other,
     }
+}
+
+/// MPEG transport streams are rows of 188-byte packets, every one starting
+/// with the sync byte 0x47, so three in a row at the right offsets is proof
+/// enough without decoding anything.
+fn is_transport_stream(path: &Path) -> bool {
+    const PACKET: usize = 188;
+    let mut head = [0u8; PACKET * 2 + 1];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    use std::io::Read;
+    let Ok(n) = file.read(&mut head) else {
+        return false;
+    };
+    n == head.len() && head[0] == 0x47 && head[PACKET] == 0x47 && head[PACKET * 2] == 0x47
 }
 
 /// A picture ready for the graphics layer: a canvas whose pixel size is an exact
@@ -320,6 +340,26 @@ mod tests {
     fn degenerate_inputs_do_not_panic() {
         assert_eq!(fit((0, 0), (40, 20), (16, 34)), (1, 1));
         assert_eq!(fit((640, 400), (0, 0), (16, 34)), (1, 1));
+    }
+
+    #[test]
+    fn ts_means_typescript_unless_the_bytes_say_otherwise() {
+        let dir = std::env::temp_dir();
+
+        let source = dir.join("grove_classify_test_source.ts");
+        std::fs::write(&source, "export const x: number = 1;\n").unwrap();
+        assert_eq!(classify(&source), Kind::Other);
+
+        let stream = dir.join("grove_classify_test_stream.ts");
+        let mut bytes = vec![0u8; 188 * 3];
+        for packet in bytes.chunks_mut(188) {
+            packet[0] = 0x47;
+        }
+        std::fs::write(&stream, &bytes).unwrap();
+        assert_eq!(classify(&stream), Kind::Video);
+
+        std::fs::remove_file(&source).ok();
+        std::fs::remove_file(&stream).ok();
     }
 
     #[test]
